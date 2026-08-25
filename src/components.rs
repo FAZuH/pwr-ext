@@ -37,6 +37,7 @@ use serenity::model::id::UserId;
 
 use crate::util::capture_value;
 use crate::util::mirror;
+use crate::util::opaque_wrapper;
 use crate::util::tag;
 
 /// Mirror of [`CreateButton`].
@@ -47,16 +48,16 @@ use crate::util::tag;
 /// no-ops where they would contradict the constructor.
 #[derive(Debug, Deserialize)]
 pub struct CreateButtonDe<'a> {
-    pub style: ButtonStyle,
+    style: ButtonStyle,
     #[serde(rename = "type")]
     _kind: ComponentType,
-    pub url: Option<Cow<'a, str>>,
-    pub custom_id: Option<Cow<'a, str>>,
-    pub sku_id: Option<SkuId>,
-    pub label: Option<Cow<'a, str>>,
-    pub emoji: Option<ReactionType>,
+    url: Option<Cow<'a, str>>,
+    custom_id: Option<Cow<'a, str>>,
+    sku_id: Option<SkuId>,
+    label: Option<Cow<'a, str>>,
+    emoji: Option<ReactionType>,
     #[serde(default)]
-    pub disabled: bool,
+    disabled: bool,
 }
 
 impl<'a> From<CreateButtonDe<'a>> for CreateButton<'a> {
@@ -144,20 +145,20 @@ fn parse_action_row(value: &Value) -> Result<CreateActionRowDe<'static>, String>
                 .collect::<Result<Vec<_>, _>>()?;
             Ok(CreateActionRowDe::Buttons(buttons))
         }
-        kind @ (3 | 5 | 6 | 7 | 8) => {
+        other => {
+            let Some(menu) = CreateSelectMenuDe::from_node(first)? else {
+                return Err(format!(
+                    "unsupported action-row component type {other}: {first}"
+                ));
+            };
             if components.len() != 1 {
                 return Err(format!(
                     "a select-menu action row holds exactly one component, got {}: {value}",
                     components.len()
                 ));
             }
-            let menu: CreateSelectMenuDe<'static> = mirror(first)?;
-            debug_assert_eq!(menu.kind_number(), kind);
             Ok(CreateActionRowDe::SelectMenu(menu))
         }
-        other => Err(format!(
-            "unsupported action-row component type {other}: {first}"
-        )),
     }
 }
 
@@ -169,19 +170,35 @@ fn parse_action_row(value: &Value) -> Result<CreateActionRowDe<'static>, String>
 /// missing required fields error there.
 #[derive(Debug)]
 pub struct CreateSelectMenuDe<'a> {
-    pub custom_id: Cow<'a, str>,
-    pub placeholder: Option<Cow<'a, str>>,
-    pub min_values: Option<u8>,
-    pub max_values: Option<u8>,
-    pub required: Option<bool>,
-    pub disabled: Option<bool>,
+    custom_id: Cow<'a, str>,
+    placeholder: Option<Cow<'a, str>>,
+    min_values: Option<u8>,
+    max_values: Option<u8>,
+    required: Option<bool>,
+    disabled: Option<bool>,
     kind: SelectKindDe<'a>,
 }
 
-impl CreateSelectMenuDe<'_> {
-    /// The numeric `"type"` the menu was parsed from.
-    pub fn kind_number(&self) -> u64 {
-        self.kind.number()
+impl<'a> CreateSelectMenuDe<'a> {
+    fn from_raw(raw: RawSelectMenuDe<'a>, kind: SelectKindDe<'a>) -> Self {
+        Self {
+            custom_id: raw.custom_id,
+            placeholder: raw.placeholder,
+            min_values: raw.min_values,
+            max_values: raw.max_values,
+            required: raw.required,
+            disabled: raw.disabled,
+            kind,
+        }
+    }
+
+    /// Node-level face of the select-kind gate for tree sniffers: parses the
+    /// node when its `"type"` is one of the five select-menu kinds, declines
+    /// every other node with `Ok(None)`.
+    pub(crate) fn from_node(value: &Value) -> Result<Option<Self>, String> {
+        let raw: RawSelectMenuDe<'static> = mirror(value)?;
+        let kind = SelectKindDe::from_raw(&raw)?;
+        Ok(kind.map(|kind| Self::from_raw(raw, kind)))
     }
 }
 
@@ -229,14 +246,36 @@ enum SelectKindDe<'a> {
 }
 
 impl<'a> SelectKindDe<'a> {
-    fn number(&self) -> u64 {
-        match self {
-            SelectKindDe::String { .. } => 3,
-            SelectKindDe::User { .. } => 5,
-            SelectKindDe::Role { .. } => 6,
-            SelectKindDe::Mentionable { .. } => 7,
-            SelectKindDe::Channel { .. } => 8,
-        }
+    /// The single gate deciding which select-menu kind a parsed menu node
+    /// carries: kinds {3, 5, 6, 7, 8} map to their variant here and nowhere
+    /// else; any other tag declines with `Ok(None)`.
+    fn from_raw(raw: &RawSelectMenuDe<'a>) -> Result<Option<Self>, String> {
+        check_default_targets(&raw.default_values)?;
+
+        let kind = match raw.kind {
+            3 => SelectKindDe::String {
+                options: raw
+                    .options
+                    .clone()
+                    .ok_or_else(|| "string select requires \"options\"".to_string())?,
+            },
+            5 => SelectKindDe::User {
+                default_ids: ids_of(&raw.default_values, "user"),
+            },
+            6 => SelectKindDe::Role {
+                default_ids: ids_of(&raw.default_values, "role"),
+            },
+            7 => SelectKindDe::Mentionable {
+                user_ids: ids_of(&raw.default_values, "user"),
+                role_ids: ids_of(&raw.default_values, "role"),
+            },
+            8 => SelectKindDe::Channel {
+                channel_types: raw.channel_types.clone(),
+                default_ids: ids_of(&raw.default_values, "channel"),
+            },
+            _ => return Ok(None),
+        };
+        Ok(Some(kind))
     }
 
     fn into_select_menu_kind(self) -> CreateSelectMenuKind<'a> {
@@ -288,11 +327,11 @@ fn non_empty<T>(items: Vec<T>) -> Option<Vec<T>> {
 /// Mirror of [`CreateSelectMenuOption`](serenity::builder::CreateSelectMenuOption).
 #[derive(Clone, Debug, Deserialize)]
 pub struct CreateSelectMenuOptionDe<'a> {
-    pub label: Cow<'a, str>,
-    pub value: Cow<'a, str>,
-    pub description: Option<Cow<'a, str>>,
-    pub emoji: Option<ReactionType>,
-    pub default: Option<bool>,
+    label: Cow<'a, str>,
+    value: Cow<'a, str>,
+    description: Option<Cow<'a, str>>,
+    emoji: Option<ReactionType>,
+    default: Option<bool>,
 }
 
 impl<'a> From<CreateSelectMenuOptionDe<'a>> for CreateSelectMenuOption<'a> {
@@ -333,7 +372,7 @@ struct RawSelectMenuDe<'a> {
     #[serde(default)]
     disabled: Option<bool>,
     #[serde(rename = "type")]
-    _kind: u64,
+    kind: u64,
     #[serde(default)]
     options: Option<Vec<CreateSelectMenuOptionDe<'a>>>,
     #[serde(default)]
@@ -349,47 +388,12 @@ impl<'de, 'a> Deserialize<'de> for CreateSelectMenuDe<'a> {
     {
         let value = capture_value(deserializer)?;
         let raw: RawSelectMenuDe<'static> = mirror(&value).map_err(D::Error::custom)?;
-        let kind = resolve_kind(&raw).map_err(D::Error::custom)?;
-
-        Ok(CreateSelectMenuDe {
-            custom_id: raw.custom_id,
-            placeholder: raw.placeholder,
-            min_values: raw.min_values,
-            max_values: raw.max_values,
-            required: raw.required,
-            disabled: raw.disabled,
-            kind,
-        })
-    }
-}
-
-fn resolve_kind<'a>(raw: &RawSelectMenuDe<'a>) -> Result<SelectKindDe<'a>, String> {
-    check_default_targets(&raw.default_values)?;
-
-    match raw._kind {
-        3 => {
-            let options = raw
-                .options
-                .as_ref()
-                .ok_or_else(|| "string select requires \"options\"".to_string())?
-                .clone();
-            Ok(SelectKindDe::String { options })
-        }
-        5 => Ok(SelectKindDe::User {
-            default_ids: ids_of(&raw.default_values, "user"),
-        }),
-        6 => Ok(SelectKindDe::Role {
-            default_ids: ids_of(&raw.default_values, "role"),
-        }),
-        7 => Ok(SelectKindDe::Mentionable {
-            user_ids: ids_of(&raw.default_values, "user"),
-            role_ids: ids_of(&raw.default_values, "role"),
-        }),
-        8 => Ok(SelectKindDe::Channel {
-            channel_types: raw.channel_types.clone(),
-            default_ids: ids_of(&raw.default_values, "channel"),
-        }),
-        other => Err(format!("unsupported select-menu type {other}")),
+        let kind = SelectKindDe::from_raw(&raw)
+            .map_err(D::Error::custom)?
+            .ok_or_else(|| {
+                D::Error::custom(format!("unsupported select-menu type {}", raw.kind))
+            })?;
+        Ok(Self::from_raw(raw, kind))
     }
 }
 
@@ -423,25 +427,9 @@ fn ids_of(defaults: &[SelectDefaultDe], target: &str) -> Vec<u64> {
 /// (`'static`). See the crate docs for why `#[serde(untagged)]` must not be
 /// used here.
 #[derive(Debug)]
-pub struct CreateComponentDe(pub CreateComponent<'static>);
+pub struct CreateComponentDe(CreateComponent<'static>);
 
-impl<'de> Deserialize<'de> for CreateComponentDe {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: Deserializer<'de>,
-    {
-        let value = capture_value(deserializer)?;
-        parse_component(&value)
-            .map_err(D::Error::custom)
-            .map(CreateComponentDe)
-    }
-}
-
-impl From<CreateComponentDe> for CreateComponent<'static> {
-    fn from(de: CreateComponentDe) -> Self {
-        de.0
-    }
-}
+opaque_wrapper!(CreateComponentDe, CreateComponent<'static>, parse_component);
 
 fn parse_component(value: &Value) -> Result<CreateComponent<'static>, String> {
     Ok(match tag(value)? {

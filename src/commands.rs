@@ -19,8 +19,8 @@ use serenity::model::application::InteractionContext;
 use serenity::model::channel::ChannelType;
 use serenity::model::id::CommandPermissionId;
 
-use crate::util::capture_value;
 use crate::util::mirror;
+use crate::util::opaque_wrapper;
 
 /// Mirror of [`CreateCommand`].
 ///
@@ -280,25 +280,13 @@ impl CommandOptionChoiceDe {
 /// 2 = user, 3 = channel. Upstream exposes no constructor for unknown
 /// kinds, so any other number errors at deserialization time (spec D5).
 #[derive(Debug)]
-pub struct CreateCommandPermissionDe(pub CreateCommandPermission);
+pub struct CreateCommandPermissionDe(CreateCommandPermission);
 
-impl From<CreateCommandPermissionDe> for CreateCommandPermission {
-    fn from(de: CreateCommandPermissionDe) -> Self {
-        de.0
-    }
-}
-
-impl<'de> Deserialize<'de> for CreateCommandPermissionDe {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: Deserializer<'de>,
-    {
-        let value = capture_value(deserializer)?;
-        parse_command_permission(&value)
-            .map_err(D::Error::custom)
-            .map(CreateCommandPermissionDe)
-    }
-}
+opaque_wrapper!(
+    CreateCommandPermissionDe,
+    CreateCommandPermission,
+    parse_command_permission
+);
 
 #[derive(Debug, Deserialize)]
 struct RawCommandPermissionDe {

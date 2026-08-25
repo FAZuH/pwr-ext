@@ -81,20 +81,20 @@ impl From<CreateAllowedMentionsDe> for CreateAllowedMentions<'static> {
 /// required here.
 #[derive(Debug, Deserialize)]
 pub struct CreateMessageDe {
-    pub content: Option<Cow<'static, str>>,
-    pub nonce: Option<Nonce>,
-    pub tts: bool,
+    content: Option<Cow<'static, str>>,
+    nonce: Option<Nonce>,
+    tts: bool,
     #[serde(default)]
-    pub embeds: Vec<CreateEmbedDe<'static>>,
-    pub allowed_mentions: Option<CreateAllowedMentionsDe>,
-    pub message_reference: Option<MessageReference>,
-    pub components: Option<Vec<CreateComponentDe>>,
+    embeds: Vec<CreateEmbedDe<'static>>,
+    allowed_mentions: Option<CreateAllowedMentionsDe>,
+    message_reference: Option<MessageReference>,
+    components: Option<Vec<CreateComponentDe>>,
     #[serde(default)]
-    pub sticker_ids: Vec<StickerId>,
-    pub flags: Option<MessageFlags>,
+    sticker_ids: Vec<StickerId>,
+    flags: Option<MessageFlags>,
     #[serde(rename = "attachments", default)]
     _attachments: Vec<Value>,
-    pub enforce_nonce: bool,
+    enforce_nonce: bool,
     #[serde(default)]
     poll: Option<crate::poll::CreatePollDe>,
 }

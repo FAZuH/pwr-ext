@@ -78,14 +78,14 @@ The table lists every upstream `Create*` type against this crate. "Mirror" means
 | Family | Types | Support |
 |---|---|---|
 | Embeds | `CreateEmbed`, `CreateEmbedAuthor`, `CreateEmbedFooter` | Mirror |
-| Embed children | `CreateEmbedField`, `CreateEmbedImage` | In tree |
-| Components v1 | `CreateActionRow`, `CreateButton`, `CreateSelectMenu`, `CreateSelectMenuKind`, `CreateSelectMenuOption` | Mirror |
+| Embed children | `CreateEmbedField`, `CreateEmbedImage` | Mirror |
+| Components v1 | `CreateActionRow`, `CreateButton`, `CreateSelectMenu`, `CreateSelectMenuKind`, `CreateSelectMenuOption` | Mirror or in tree |
 | Components v2 | `CreateComponent`, `CreateContainer`, `CreateContainerComponent`, `CreateFile`, `CreateMediaGallery`, `CreateMediaGalleryItem`, `CreateSection`, `CreateSectionAccessory`, `CreateSectionComponent`, `CreateSeparator`, `CreateTextDisplay`, `CreateThumbnail`, `CreateUnfurledMediaItem` | Mirror or in tree |
 | Message | `CreateMessage`, `CreateAllowedMentions` | Mirror |
 | Modal | `CreateModal`, `CreateModalComponent`, `CreateLabel` | Mirror |
 | Label children | `CreateInputText`, `CreateFileUpload`, `CreateCheckbox`, `CreateCheckboxGroup`, `CreateCheckboxGroupOption`, `CreateRadioGroup`, `CreateRadioGroupOption` | In tree |
 | Interaction responses | `CreateInteractionResponse`, `CreateInteractionResponseMessage`, `CreateInteractionResponseFollowup`, `CreateAutocompleteResponse` | Mirror |
-| Autocomplete children | `AutocompleteChoice`, `AutocompleteValue` | In tree |
+| Autocomplete children | `AutocompleteChoice`, `AutocompleteValue` | Mirror |
 | Polls | `CreatePoll`, `CreatePollAnswer` | Mirror |
 | Soundboard | `CreateSoundboard` | Mirror |
 | Guild | `CreateChannel`, `CreateForumPost`, `CreateForumTag`, `CreateInvite`, `CreateScheduledEvent`, `CreateStageInstance`, `CreateThread`, `CreateWebhook` | Mirror |

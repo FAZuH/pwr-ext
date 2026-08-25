@@ -15,20 +15,20 @@ use serenity::model::Timestamp;
 /// it and always rebuilds as `"rich"` (spec D7).
 #[derive(Debug, Deserialize)]
 pub struct CreateEmbedDe<'a> {
-    pub title: Option<Cow<'a, str>>,
+    title: Option<Cow<'a, str>>,
     #[serde(rename = "type")]
     _kind: Option<String>,
-    pub description: Option<Cow<'a, str>>,
-    pub url: Option<Cow<'a, str>>,
-    pub timestamp: Option<Timestamp>,
+    description: Option<Cow<'a, str>>,
+    url: Option<Cow<'a, str>>,
+    timestamp: Option<Timestamp>,
     #[serde(rename = "color")]
-    pub colour: Option<Colour>,
-    pub footer: Option<CreateEmbedFooterDe<'a>>,
-    pub image: Option<CreateEmbedImageDe<'a>>,
-    pub thumbnail: Option<CreateEmbedImageDe<'a>>,
-    pub author: Option<CreateEmbedAuthorDe<'a>>,
+    colour: Option<Colour>,
+    footer: Option<CreateEmbedFooterDe<'a>>,
+    image: Option<CreateEmbedImageDe<'a>>,
+    thumbnail: Option<CreateEmbedImageDe<'a>>,
+    author: Option<CreateEmbedAuthorDe<'a>>,
     #[serde(default)]
-    pub fields: Vec<CreateEmbedFieldDe<'a>>,
+    fields: Vec<CreateEmbedFieldDe<'a>>,
 }
 
 /// Mirror of [`CreateEmbedAuthor`].
@@ -37,16 +37,16 @@ pub struct CreateEmbedDe<'a> {
 /// skip attribute), so they stay plain `Option`s.
 #[derive(Debug, Deserialize)]
 pub struct CreateEmbedAuthorDe<'a> {
-    pub name: Cow<'a, str>,
-    pub url: Option<Cow<'a, str>>,
-    pub icon_url: Option<Cow<'a, str>>,
+    name: Cow<'a, str>,
+    url: Option<Cow<'a, str>>,
+    icon_url: Option<Cow<'a, str>>,
 }
 
 /// Mirror of [`CreateEmbedFooter`].
 #[derive(Debug, Deserialize)]
 pub struct CreateEmbedFooterDe<'a> {
-    pub text: Cow<'a, str>,
-    pub icon_url: Option<Cow<'a, str>>,
+    text: Cow<'a, str>,
+    icon_url: Option<Cow<'a, str>>,
 }
 
 /// Mirror of the upstream-private `CreateEmbedField`.
@@ -54,16 +54,16 @@ pub struct CreateEmbedFooterDe<'a> {
 /// `inline` is always serialized by upstream and therefore required here.
 #[derive(Debug, Deserialize)]
 pub struct CreateEmbedFieldDe<'a> {
-    pub name: Cow<'a, str>,
-    pub value: Cow<'a, str>,
-    pub inline: bool,
+    name: Cow<'a, str>,
+    value: Cow<'a, str>,
+    inline: bool,
 }
 
 /// Mirror of the upstream-private `CreateEmbedImage`.
 #[derive(Debug, Deserialize)]
 pub struct CreateEmbedImageDe<'a> {
-    pub url: Cow<'a, str>,
-    pub description: Option<Cow<'a, str>>,
+    url: Cow<'a, str>,
+    description: Option<Cow<'a, str>>,
 }
 
 impl<'a> From<CreateEmbedDe<'a>> for CreateEmbed<'a> {

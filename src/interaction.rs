@@ -8,8 +8,6 @@ use std::borrow::Cow;
 use std::collections::HashMap;
 
 use serde::Deserialize;
-use serde::Deserializer;
-use serde::de::Error as _;
 use serde_json::Value;
 use serenity::builder::AutocompleteChoice;
 use serenity::builder::AutocompleteValue;
@@ -22,8 +20,8 @@ use crate::components::CreateComponentDe;
 use crate::embed::CreateEmbedDe;
 use crate::message::CreateAllowedMentionsDe;
 use crate::poll::CreatePollDe;
-use crate::util::capture_value;
 use crate::util::mirror;
+use crate::util::opaque_wrapper;
 
 /// Mirror of the upstream enum [`CreateInteractionResponse`].
 ///
@@ -31,25 +29,13 @@ use crate::util::mirror;
 /// the mirror dispatches on the numeric kind tag. The upstream enum has no
 /// unknown-value fallback, so any other kind errors at deserialization time.
 #[derive(Debug)]
-pub struct CreateInteractionResponseDe(pub CreateInteractionResponse<'static>);
+pub struct CreateInteractionResponseDe(CreateInteractionResponse<'static>);
 
-impl From<CreateInteractionResponseDe> for CreateInteractionResponse<'static> {
-    fn from(de: CreateInteractionResponseDe) -> Self {
-        de.0
-    }
-}
-
-impl<'de> Deserialize<'de> for CreateInteractionResponseDe {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: Deserializer<'de>,
-    {
-        let value = capture_value(deserializer)?;
-        parse_interaction_response(&value)
-            .map_err(D::Error::custom)
-            .map(CreateInteractionResponseDe)
-    }
-}
+opaque_wrapper!(
+    CreateInteractionResponseDe,
+    CreateInteractionResponse<'static>,
+    parse_interaction_response
+);
 
 fn parse_interaction_response(value: &Value) -> Result<CreateInteractionResponse<'static>, String> {
     let kind = value
@@ -197,35 +183,26 @@ impl From<AutocompleteChoiceDe> for AutocompleteChoice<'static> {
 /// fractional-looking integer input therefore rebuilds through the float
 /// variant, which is the closest form the builder can represent.
 #[derive(Debug)]
-pub struct AutocompleteValueDe(pub AutocompleteValue<'static>);
+pub struct AutocompleteValueDe(AutocompleteValue<'static>);
 
-impl From<AutocompleteValueDe> for AutocompleteValue<'static> {
-    fn from(de: AutocompleteValueDe) -> Self {
-        de.0
-    }
-}
+opaque_wrapper!(
+    AutocompleteValueDe,
+    AutocompleteValue<'static>,
+    parse_autocomplete_value
+);
 
-impl<'de> Deserialize<'de> for AutocompleteValueDe {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: Deserializer<'de>,
-    {
-        let value = Value::deserialize(deserializer)?;
-        let inner = match value {
-            Value::String(string) => AutocompleteValue::String(string.into()),
-            Value::Number(ref number) if number.as_u64().is_some() => {
-                AutocompleteValue::Integer(number.as_u64().expect("checked above"))
-            }
-            Value::Number(number) => {
-                AutocompleteValue::Float(number.as_f64().expect("JSON numbers convert to f64"))
-            }
-            other => {
-                return Err(D::Error::custom(format!(
-                    "autocomplete values are string, integer, or float, got {other}"
-                )));
-            }
-        };
-        Ok(AutocompleteValueDe(inner))
+fn parse_autocomplete_value(value: &Value) -> Result<AutocompleteValue<'static>, String> {
+    match value {
+        Value::String(string) => Ok(AutocompleteValue::String(string.clone().into())),
+        Value::Number(number) if number.as_u64().is_some() => Ok(AutocompleteValue::Integer(
+            number.as_u64().expect("checked above"),
+        )),
+        Value::Number(number) => Ok(AutocompleteValue::Float(
+            number.as_f64().expect("JSON numbers convert to f64"),
+        )),
+        other => Err(format!(
+            "autocomplete values are string, integer, or float, got {other}"
+        )),
     }
 }
 

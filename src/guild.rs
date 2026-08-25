@@ -5,8 +5,6 @@
 use std::borrow::Cow;
 
 use serde::Deserialize;
-use serde::Deserializer;
-use serde::de::Error as _;
 use serde_json::Value;
 use serenity::builder::CreateChannel;
 use serenity::builder::CreateForumPost;
@@ -32,8 +30,8 @@ use serenity::nonmax::NonMaxU16;
 
 use crate::message::CreateMessageDe;
 use crate::util::DataUriDe;
-use crate::util::capture_value;
 use crate::util::mirror;
+use crate::util::opaque_wrapper;
 
 /// Mirror of [`CreateChannel`].
 ///
@@ -149,25 +147,9 @@ impl From<CreateChannelDe> for CreateChannel<'static> {
 /// rebuild as explicit `null`s. Carrying both emoji fields at once is
 /// rejected, mirroring what the builder can represent.
 #[derive(Debug)]
-pub struct CreateForumTagDe(pub CreateForumTag<'static>);
+pub struct CreateForumTagDe(CreateForumTag<'static>);
 
-impl From<CreateForumTagDe> for CreateForumTag<'static> {
-    fn from(de: CreateForumTagDe) -> Self {
-        de.0
-    }
-}
-
-impl<'de> Deserialize<'de> for CreateForumTagDe {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: Deserializer<'de>,
-    {
-        let value = capture_value(deserializer)?;
-        parse_forum_tag(&value)
-            .map_err(D::Error::custom)
-            .map(CreateForumTagDe)
-    }
-}
+opaque_wrapper!(CreateForumTagDe, CreateForumTag<'static>, parse_forum_tag);
 
 #[derive(Debug, Deserialize)]
 struct RawForumTagDe {
@@ -367,9 +349,7 @@ impl From<CreateScheduledEventDe> for CreateScheduledEvent<'static> {
             event = event.description(description);
         }
         if let Some(image) = de.image {
-            let image = serenity::builder::DataUri::from_base64(image.0)
-                .expect("data URI validated during deserialization");
-            event = event.image(image);
+            event = event.image(image.into_data_uri());
         }
         event
     }
@@ -414,11 +394,7 @@ impl From<CreateWebhookDe> for CreateWebhook<'static> {
     fn from(de: CreateWebhookDe) -> Self {
         let webhook = CreateWebhook::new(de.name);
         match de.avatar {
-            Some(avatar) => {
-                let avatar = serenity::builder::DataUri::from_base64(avatar.0)
-                    .expect("data URI validated during deserialization");
-                webhook.avatar(avatar)
-            }
+            Some(avatar) => webhook.avatar(avatar.into_data_uri()),
             None => webhook,
         }
     }

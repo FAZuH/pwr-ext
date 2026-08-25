@@ -3,8 +3,6 @@
 use std::borrow::Cow;
 
 use serde::Deserialize;
-use serde::Deserializer;
-use serde::de::Error as _;
 use serde_json::Value;
 use serenity::builder::CreateCheckbox;
 use serenity::builder::CreateCheckboxGroup;
@@ -21,8 +19,8 @@ use serenity::model::application::InputTextStyle;
 
 use crate::components::CreateSelectMenuDe;
 use crate::components::parse_text_display;
-use crate::util::capture_value;
 use crate::util::mirror;
+use crate::util::opaque_wrapper;
 use crate::util::tag;
 
 /// Mirror of [`CreateModal`].
@@ -54,25 +52,13 @@ impl From<CreateModalDe> for CreateModal<'static> {
 /// 18 = label); see the crate docs for why `#[serde(untagged)]` must not be
 /// used here.
 #[derive(Debug)]
-pub struct CreateModalComponentDe(pub CreateModalComponent<'static>);
+pub struct CreateModalComponentDe(CreateModalComponent<'static>);
 
-impl From<CreateModalComponentDe> for CreateModalComponent<'static> {
-    fn from(de: CreateModalComponentDe) -> Self {
-        de.0
-    }
-}
-
-impl<'de> Deserialize<'de> for CreateModalComponentDe {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: Deserializer<'de>,
-    {
-        let value = capture_value(deserializer)?;
-        parse_modal_component(&value)
-            .map_err(D::Error::custom)
-            .map(CreateModalComponentDe)
-    }
-}
+opaque_wrapper!(
+    CreateModalComponentDe,
+    CreateModalComponent<'static>,
+    parse_modal_component
+);
 
 fn parse_modal_component(value: &Value) -> Result<CreateModalComponent<'static>, String> {
     Ok(match tag(value)? {
@@ -89,25 +75,9 @@ fn parse_modal_component(value: &Value) -> Result<CreateModalComponent<'static>,
 /// Opaque wrapper around the rebuilt label; the label's inner component is
 /// itself a tagged union resolved during deserialization.
 #[derive(Debug)]
-pub struct CreateLabelDe(pub CreateLabel<'static>);
+pub struct CreateLabelDe(CreateLabel<'static>);
 
-impl From<CreateLabelDe> for CreateLabel<'static> {
-    fn from(de: CreateLabelDe) -> Self {
-        de.0
-    }
-}
-
-impl<'de> Deserialize<'de> for CreateLabelDe {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: Deserializer<'de>,
-    {
-        let value = capture_value(deserializer)?;
-        parse_label(&value)
-            .map_err(D::Error::custom)
-            .map(CreateLabelDe)
-    }
-}
+opaque_wrapper!(CreateLabelDe, CreateLabel<'static>, parse_label);
 
 #[derive(Debug, Deserialize)]
 struct RawLabelDe {
@@ -137,9 +107,9 @@ fn parse_label(value: &Value) -> Result<CreateLabel<'static>, String> {
     Ok(label)
 }
 
-// The label's inner component, discriminated by "type": select menus
-// 3/5/6/7/8, text input 4, file upload 19, radio group 21,
-// checkbox group 22, checkbox 23.
+// The label's inner component, discriminated by "type": select menus are
+// delegated to the shared select-kind gate; text input 4, file upload 19,
+// radio group 21, checkbox group 22, checkbox 23.
 enum LabelChildDe {
     SelectMenu(CreateSelectMenu<'static>),
     InputText(CreateInputText<'static>),
@@ -150,12 +120,11 @@ enum LabelChildDe {
 }
 
 fn parse_label_component(value: &Value) -> Result<LabelChildDe, String> {
-    Ok(match tag(value)? {
-        kind @ (3 | 5 | 6 | 7 | 8) => {
-            let menu: CreateSelectMenuDe<'static> = mirror(value)?;
-            debug_assert_eq!(menu.kind_number(), kind);
-            LabelChildDe::SelectMenu(menu.into())
-        }
+    let kind = tag(value)?;
+    if let Some(menu) = CreateSelectMenuDe::from_node(value)? {
+        return Ok(LabelChildDe::SelectMenu(menu.into()));
+    }
+    Ok(match kind {
         4 => LabelChildDe::InputText(parse_input_text(value)?),
         19 => LabelChildDe::FileUpload(parse_file_upload(value)?),
         21 => LabelChildDe::RadioGroup(parse_radio_group(value)?),

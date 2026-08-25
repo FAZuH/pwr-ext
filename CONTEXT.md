@@ -8,6 +8,10 @@
 A pwr-ext type that mirrors a serenity-next builder's JSON shape, implements `Deserialize`, and converts into the upstream builder through its own setters. The crate's only public surface pattern.
 _Avoid_: adapter, DTO, proxy
 
+**Public surface**:
+The written exposure rule: the public surface is exactly the Wrapper types, their `From<Wrapper> for Builder` impls, the prelude re-exports, and documented inherent methods a dependee consumes (`CreateMessageDe::into_canonical_value`, currently consumed by pwr-viewgen). Everything else — parse functions, mirror structs, helpers, wrapper fields, inner builders — stays crate-private even when `pub` would compile. New items join the surface only by adding a Wrapper plus its prelude entry.
+_Avoid_: leaking internals, accidental pub
+
 **Flat builder**:
 A builder whose JSON form is a plain struct of fields — handled by a derived mirror struct plus setter conversion.
 _Avoid_: simple builder

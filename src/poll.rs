@@ -101,10 +101,7 @@ pub struct CreateSoundboardDe {
 
 impl From<CreateSoundboardDe> for CreateSoundboard<'static> {
     fn from(de: CreateSoundboardDe) -> Self {
-        // The URI shape was validated at deserialization time; upstream's
-        // constructor re-checks it and cannot fail here.
-        let sound = serenity::builder::DataUri::from_base64(de.sound.0)
-            .expect("data URI validated during deserialization");
+        let sound = de.sound.into_data_uri();
         let mut soundboard = CreateSoundboard::new(de.name, sound).volume(de.volume);
         if let Some(emoji_id) = de.emoji_id {
             soundboard = soundboard.emoji_id(emoji_id);

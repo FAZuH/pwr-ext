@@ -10,6 +10,7 @@ use std::borrow::Cow;
 use serde::Deserialize;
 use serde::de::DeserializeOwned;
 use serde_json::Value;
+use serenity::builder::DataUri;
 
 /// Captures any input as an untyped [`Value`] inside a custom `Deserialize`
 /// impl, for tag-dispatched tree types.
@@ -38,6 +39,34 @@ pub(crate) fn mirror<T: DeserializeOwned>(value: &Value) -> Result<T, String> {
     T::deserialize(value.clone()).map_err(|e| e.to_string())
 }
 
+/// Declares the boilerplate behind an opaque wrapper: a custom
+/// `Deserialize` impl that captures the node and hands it to the wrapper's
+/// `parse_*` function, plus the identity `From<Wrapper> for Builder`
+/// conversion over the tuple field.
+macro_rules! opaque_wrapper {
+    ($wrapper:ident, $inner:ty, $parse:expr) => {
+        impl From<$wrapper> for $inner {
+            fn from(de: $wrapper) -> Self {
+                de.0
+            }
+        }
+
+        impl<'de> serde::Deserialize<'de> for $wrapper {
+            fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+            where
+                D: serde::Deserializer<'de>,
+            {
+                let value = crate::util::capture_value(deserializer)?;
+                $parse(&value)
+                    .map_err(<D::Error as serde::de::Error>::custom)
+                    .map($wrapper)
+            }
+        }
+    };
+}
+
+pub(crate) use opaque_wrapper;
+
 /// Transparent mirror of upstream's [`DataUri`](serenity::builder::DataUri):
 /// a plain string on the wire, validated against the same data-URI shape
 /// upstream checks (`data:<type>/<subtype>;base64,<payload>`), so invalid
@@ -56,6 +85,15 @@ impl<'de> Deserialize<'de> for DataUriDe {
         } else {
             Err(serde::de::Error::custom(format!("invalid data URI: {s}")))
         }
+    }
+}
+
+impl DataUriDe {
+    /// Converts into upstream's [`DataUri`]. Total: deserialization already
+    /// enforced the exact URI grammar the upstream constructor re-checks, so
+    /// this cannot fail.
+    pub(crate) fn into_data_uri(self) -> DataUri<'static> {
+        DataUri::from_base64(self.0).expect("data URI validated during deserialization")
     }
 }
 

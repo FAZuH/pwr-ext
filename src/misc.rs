@@ -6,8 +6,6 @@ use std::borrow::Cow;
 use std::convert::TryInto as _;
 
 use serde::Deserialize;
-use serde::Deserializer;
-use serde::de::Error as _;
 use serde_json::Value;
 use serenity::builder::CreateGuildWelcomeChannel;
 use serenity::builder::CreateRoleColours;
@@ -18,8 +16,8 @@ use serenity::model::id::EmojiId;
 use serenity::model::id::GenericChannelId;
 use small_fixed_array::FixedString as WelcomeScreenFixedString;
 
-use crate::util::capture_value;
 use crate::util::mirror;
+use crate::util::opaque_wrapper;
 
 /// Mirror of [`CreateGuildWelcomeChannel`].
 ///
@@ -28,25 +26,13 @@ use crate::util::mirror;
 /// whose custom variant always carries both id and name, so a payload with
 /// `emoji_id` but no `emoji_name` errors — the builder cannot represent it.
 #[derive(Debug)]
-pub struct CreateGuildWelcomeChannelDe(pub CreateGuildWelcomeChannel<'static>);
+pub struct CreateGuildWelcomeChannelDe(CreateGuildWelcomeChannel<'static>);
 
-impl From<CreateGuildWelcomeChannelDe> for CreateGuildWelcomeChannel<'static> {
-    fn from(de: CreateGuildWelcomeChannelDe) -> Self {
-        de.0
-    }
-}
-
-impl<'de> Deserialize<'de> for CreateGuildWelcomeChannelDe {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: Deserializer<'de>,
-    {
-        let value = capture_value(deserializer)?;
-        parse_welcome_channel(&value)
-            .map_err(D::Error::custom)
-            .map(CreateGuildWelcomeChannelDe)
-    }
-}
+opaque_wrapper!(
+    CreateGuildWelcomeChannelDe,
+    CreateGuildWelcomeChannel<'static>,
+    parse_welcome_channel
+);
 
 #[derive(Debug, Deserialize)]
 struct RawWelcomeChannelDe {
@@ -117,25 +103,13 @@ impl From<CreateRoleColoursDe> for CreateRoleColours {
 /// Upstream builds `owner_type` from a two-variant owner enum (1 = guild,
 /// 2 = user), so any other number errors at deserialization time.
 #[derive(Debug)]
-pub struct CreateTestEntitlementDe(pub CreateTestEntitlement);
+pub struct CreateTestEntitlementDe(CreateTestEntitlement);
 
-impl From<CreateTestEntitlementDe> for CreateTestEntitlement {
-    fn from(de: CreateTestEntitlementDe) -> Self {
-        de.0
-    }
-}
-
-impl<'de> Deserialize<'de> for CreateTestEntitlementDe {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: Deserializer<'de>,
-    {
-        let value = capture_value(deserializer)?;
-        parse_test_entitlement(&value)
-            .map_err(D::Error::custom)
-            .map(CreateTestEntitlementDe)
-    }
-}
+opaque_wrapper!(
+    CreateTestEntitlementDe,
+    CreateTestEntitlement,
+    parse_test_entitlement
+);
 
 #[derive(Debug, Deserialize)]
 struct RawTestEntitlementDe {
