@@ -1,0 +1,7 @@
+error: link button (`url`) cannot have `custom_id`
+ --> tests/ui/button_link_with_custom_id.rs:3:13
+  |
+3 |     let _ = view! { action_row { button { custom_id: "1", url: "https://example.test", label: "a" } } };
+  |             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  |
+  = note: this error originates in the macro `view` (in Nightly builds, run with -Z macro-backtrace for more info)

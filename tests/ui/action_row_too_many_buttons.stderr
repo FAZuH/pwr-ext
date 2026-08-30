@@ -1,0 +1,5 @@
+error: action_row cannot contain more than 5 buttons
+  --> tests/ui/action_row_too_many_buttons.rs:10:13
+   |
+10 |             button { custom_id: "6", label: "f" }
+   |             ^^^^^^

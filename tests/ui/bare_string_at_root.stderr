@@ -1,0 +1,5 @@
+error: bare string not allowed at message root — only inside `text_display { "..." }`
+ --> tests/ui/bare_string_at_root.rs:3:21
+  |
+3 |     let _ = view! { "bare string at root" };
+  |                     ^^^^^^^^^^^^^^^^^^^^^

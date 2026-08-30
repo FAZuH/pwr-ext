@@ -1,0 +1,7 @@
+error: `components_v2` must contain at least one component
+ --> tests/ui/components_v2_empty.rs:3:13
+  |
+3 |     let _ = view! { components_v2 { } };
+  |             ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  |
+  = note: this error originates in the macro `view` (in Nightly builds, run with -Z macro-backtrace for more info)

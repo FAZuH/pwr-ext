@@ -1,0 +1,7 @@
+error: button requires `custom_id` (or `url` for link, `sku_id` for premium)
+ --> tests/ui/button_missing_id.rs:3:13
+  |
+3 |     let _ = view! { action_row { button { label: "a" } } };
+  |             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  |
+  = note: this error originates in the macro `view` (in Nightly builds, run with -Z macro-backtrace for more info)

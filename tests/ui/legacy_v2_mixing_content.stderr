@@ -1,0 +1,5 @@
+error: legacy attribute cannot appear alongside `components_v2` — use one family per `view!`
+ --> tests/ui/legacy_v2_mixing_content.rs:4:9
+  |
+4 |         content: "hi"
+  |         ^^^^^^^

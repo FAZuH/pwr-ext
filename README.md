@@ -95,6 +95,47 @@ The table lists every upstream `Create*` type against this crate. "Mirror" means
 
 Count: 53 of 56 public upstream `Create*` types are supported.
 
+## View macros (feature `macros`)
+
+An opt-in `view!` DSL for authoring serenity message views. Enable with:
+
+```toml
+pwr-ext = { path = "../pwr-ext", features = ["macros"] }
+```
+
+```rust
+use pwr_ext::view;
+use pwr_ext::view_support::{ButtonStyle, Colour};
+
+// Legacy: content + embeds + action rows
+let legacy = view! {
+    content: "Hello"
+    embed { title: "Title", colour: Colour::from(0xFF00FF), field { name: "n", value: "v", inline: true } }
+    action_row {
+        button { custom_id: "btn:1", label: "Click", style: ButtonStyle::Primary }
+    }
+};
+
+// Components v2: explicit `components_v2` root, macro auto-sets `IS_COMPONENTS_V2`
+let v2 = view! {
+    components_v2 {
+        container {
+            accent_color: 0xFF0000,
+            text_display { "Hello **v2**" }
+            section {
+                text_display { "Side text" }
+                thumbnail { media: "https://example.test/thumb.png" }
+            }
+            action_row {
+                button { url: "https://example.test", label: "Link" }
+            }
+        }
+    }
+};
+```
+
+Two families are statically separated: mixing `content`/`embed` with `components_v2` is a compile error. Literal checks (button style laws, `action_row` ≤5 buttons or 1 select, `section` 1–3 text displays + 1 accessory, `select_menu` ≤25 options) fire at compile time; dynamic values degrade to runtime validation. Generated code references only `::pwr_ext::view_support`, so call sites never need a direct `serenity` dependency for builder types — `use pwr_ext::view_support::*` or `pwr_ext::prelude::*` covers imports, and `serde::Deserialize` is re-exported from the prelude for generic code.
+
 ## Exclusions
 
 Three types stay out on purpose:

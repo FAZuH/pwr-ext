@@ -1,0 +1,5 @@
+error: unknown root attribute `unknown_attr` (known: content, tts, nonce, enforce_nonce, flags, sticker_ids)
+ --> tests/ui/legacy_unknown_attr.rs:3:21
+  |
+3 |     let _ = view! { unknown_attr: "hi" };
+  |                     ^^^^^^^^^^^^

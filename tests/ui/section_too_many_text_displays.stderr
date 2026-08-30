@@ -1,0 +1,5 @@
+error: section cannot contain more than 3 text_display components
+ --> tests/ui/section_too_many_text_displays.rs:9:17
+  |
+9 |                 text_display { "d" }
+  |                 ^^^^^^^^^^^^

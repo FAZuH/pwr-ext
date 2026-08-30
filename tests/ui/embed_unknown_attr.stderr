@@ -1,0 +1,5 @@
+error: unknown embed attribute `unknown`
+ --> tests/ui/embed_unknown_attr.rs:3:29
+  |
+3 |     let _ = view! { embed { unknown: "x" } };
+  |                             ^^^^^^^

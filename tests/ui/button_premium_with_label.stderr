@@ -1,0 +1,7 @@
+error: premium button (`sku_id`) cannot have `label`
+ --> tests/ui/button_premium_with_label.rs:3:13
+  |
+3 |     let _ = view! { action_row { button { sku_id: 123, label: "a" } } };
+  |             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  |
+  = note: this error originates in the macro `view` (in Nightly builds, run with -Z macro-backtrace for more info)

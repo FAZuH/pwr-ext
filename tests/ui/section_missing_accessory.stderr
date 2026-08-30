@@ -1,0 +1,12 @@
+error: section requires exactly one accessory (`thumbnail` or `button`)
+ --> tests/ui/section_missing_accessory.rs:3:13
+  |
+3 |       let _ = view! {
+  |  _____________^
+4 | |         components_v2 {
+5 | |             section { text_display { "hi" } }
+6 | |         }
+7 | |     };
+  | |_____^
+  |
+  = note: this error originates in the macro `view` (in Nightly builds, run with -Z macro-backtrace for more info)

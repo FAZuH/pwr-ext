@@ -31,3 +31,24 @@ _Avoid_: parity check, mirror test
 **Excluded type**:
 A builder permanently outside the crate's scope because it has no JSON form (multipart upload bodies travel as MIME parts) or no upstream `Serialize` impl to mirror. Listed in the README, never half-supported.
 _Avoid_: unsupported type, TODO
+
+**View macro**:
+The `view!` proc-macro DSL that authors serenity message views. Expands to builder construction code referencing only `::pwr_ext::view_support` paths.
+
+**Family**:
+A statically-separated message kind: legacy (`content`, `embeds`) or components v2 (`components_v2` with `IS_COMPONENTS_V2`). Mixing families is a compile error.
+
+**Element**:
+A named block in the DSL (`embed`, `action_row`, `container`, …) that maps to a builder type. Names are snake_case minus `Create`.
+
+**Attribute**:
+A `key: value` pair inside an element or at the root that maps to a builder setter. Values are arbitrary Rust expressions.
+
+**Child rule**:
+Which elements may appear under a parent, and with what cardinality (e.g. action_row ≤5 buttons or 1 select, section 1–3 text displays + 1 accessory). Enforced at compile time when children are literals.
+
+**Registry**:
+The hand-maintained table in `pwr-ext-macros` mapping element → builder type, attribute → setter, and allowed children. The macro's single source of truth for name checking and did-you-mean.
+
+**Wrap rule**:
+Parent-decided enum wrapping for children that exist in multiple trees (e.g. `action_row` under `view!` becomes `CreateComponent::ActionRow`, under `container` becomes `CreateContainerComponent::ActionRow`).

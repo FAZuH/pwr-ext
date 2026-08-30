@@ -67,8 +67,53 @@ pub mod modal;
 pub mod poll;
 pub(crate) mod util;
 
-/// Every wrapper type this crate provides.
+#[cfg(feature = "macros")]
+pub use pwr_ext_macros::view;
+
+/// Re-exports of serenity builder and model types referenced by the `view!`
+/// macro's generated code. Call sites never need a direct `serenity`
+/// dependency; the macro always emits `::pwr_ext::view_support::…` paths.
+pub mod view_support {
+    pub use serenity::builder::CreateActionRow;
+    pub use serenity::builder::CreateAllowedMentions;
+    pub use serenity::builder::CreateButton;
+    pub use serenity::builder::CreateComponent;
+    pub use serenity::builder::CreateContainer;
+    pub use serenity::builder::CreateContainerComponent;
+    pub use serenity::builder::CreateEmbed;
+    pub use serenity::builder::CreateEmbedAuthor;
+    pub use serenity::builder::CreateEmbedFooter;
+    pub use serenity::builder::CreateFile;
+    pub use serenity::builder::CreateMediaGallery;
+    pub use serenity::builder::CreateMediaGalleryItem;
+    pub use serenity::builder::CreateMessage;
+    pub use serenity::builder::CreatePoll;
+    pub use serenity::builder::CreatePollAnswer;
+    pub use serenity::builder::CreateSection;
+    pub use serenity::builder::CreateSectionAccessory;
+    pub use serenity::builder::CreateSectionComponent;
+    pub use serenity::builder::CreateSelectMenu;
+    pub use serenity::builder::CreateSelectMenuKind;
+    pub use serenity::builder::CreateSelectMenuOption;
+    pub use serenity::builder::CreateSeparator;
+    pub use serenity::builder::CreateTextDisplay;
+    pub use serenity::builder::CreateThumbnail;
+    pub use serenity::builder::CreateUnfurledMediaItem;
+    pub use serenity::model::Colour;
+    pub use serenity::model::Timestamp;
+    pub use serenity::model::application::ButtonStyle;
+    pub use serenity::model::application::SeparatorSpacingSize;
+    pub use serenity::model::channel::MessageFlags;
+    pub use serenity::model::channel::PollLayoutType;
+    pub use serenity::model::channel::ReactionType;
+}
+
+/// Every wrapper type this crate provides, plus `serde::Deserialize` for
+/// generic call sites (`serde_json::from_value::<CreateEmbedDe>(v)` needs
+/// only the type in scope, but `fn foo<T: Deserialize>(…)` needs the trait).
 pub mod prelude {
+    pub use serde::Deserialize;
+
     pub use crate::commands::CreateCommandDe;
     pub use crate::commands::CreateCommandOptionDe;
     pub use crate::commands::CreateCommandPermissionDe;

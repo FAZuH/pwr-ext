@@ -1,0 +1,7 @@
+error: media_gallery must contain at least one `media_gallery_item`
+ --> tests/ui/media_gallery_empty.rs:3:13
+  |
+3 |     let _ = view! { components_v2 { media_gallery { } } };
+  |             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  |
+  = note: this error originates in the macro `view` (in Nightly builds, run with -Z macro-backtrace for more info)

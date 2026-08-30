@@ -1,0 +1,5 @@
+error: action_row cannot contain both buttons and a select menu
+ --> tests/ui/action_row_mixed.rs:6:13
+  |
+6 |             select_menu { custom_id: "2" }
+  |             ^^^^^^^^^^^

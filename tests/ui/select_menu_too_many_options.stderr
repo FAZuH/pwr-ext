@@ -1,0 +1,5 @@
+error: select menu cannot have more than 25 options
+  --> tests/ui/select_menu_too_many_options.rs:32:17
+   |
+32 |                 select_menu_option { label: "z", value: "z" }
+   |                 ^^^^^^^^^^^^^^^^^^

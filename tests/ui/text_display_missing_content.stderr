@@ -1,0 +1,7 @@
+error: text_display requires content (bare string or `content: ...`)
+ --> tests/ui/text_display_missing_content.rs:3:13
+  |
+3 |     let _ = view! { components_v2 { text_display { } } };
+  |             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  |
+  = note: this error originates in the macro `view` (in Nightly builds, run with -Z macro-backtrace for more info)

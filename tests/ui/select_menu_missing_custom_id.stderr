@@ -1,0 +1,7 @@
+error: select_menu requires `custom_id`
+ --> tests/ui/select_menu_missing_custom_id.rs:3:13
+  |
+3 |     let _ = view! { action_row { select_menu { placeholder: "x" } } };
+  |             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  |
+  = note: this error originates in the macro `view` (in Nightly builds, run with -Z macro-backtrace for more info)

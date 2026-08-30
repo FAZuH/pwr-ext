@@ -1,0 +1,5 @@
+error: `embed` cannot appear inside `components_v2` — embeds are legacy-only
+ --> tests/ui/embed_in_components_v2.rs:3:37
+  |
+3 |     let _ = view! { components_v2 { embed { title: "x" } } };
+  |                                     ^^^^^

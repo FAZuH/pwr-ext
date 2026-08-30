@@ -5,8 +5,30 @@ edition = "2024"
 description = "Deserialize support for serenity-next builder types"
 publish = false
 
+[workspace]
+members = ["macros"]
+
+[features]
+macros = ["dep:pwr-ext-macros"]
+
 [dependencies]
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 small-fixed-array = "0.4"
 serenity = { git = "https://github.com/serenity-rs/serenity", branch = "next", default-features = false, features = ["builder"] }
+pwr-ext-macros = { path = "macros", optional = true }
+
+[[test]]
+name = "view_scaffold"
+required-features = ["macros"]
+
+[[test]]
+name = "view_macros"
+required-features = ["macros"]
+
+[[test]]
+name = "trybuild"
+required-features = ["macros"]
+
+[dev-dependencies]
+trybuild = "1"

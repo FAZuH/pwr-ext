@@ -1,0 +1,5 @@
+error: `container` cannot be nested inside another `container`
+ --> tests/ui/container_nested.rs:6:17
+  |
+6 |                 container { text_display { "nested" } }
+  |                 ^^^^^^^^^

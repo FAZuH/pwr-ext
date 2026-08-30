@@ -1,0 +1,7 @@
+error: field requires `name`
+ --> tests/ui/field_missing_name.rs:3:13
+  |
+3 |     let _ = view! { embed { field { value: "v", inline: true } } };
+  |             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  |
+  = note: this error originates in the macro `view` (in Nightly builds, run with -Z macro-backtrace for more info)

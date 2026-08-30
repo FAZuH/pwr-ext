@@ -1,0 +1,5 @@
+error: unknown element `unknown_element` at message root
+ --> tests/ui/legacy_unknown_element.rs:3:21
+  |
+3 |     let _ = view! { unknown_element { } };
+  |                     ^^^^^^^^^^^^^^^
