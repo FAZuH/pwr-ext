@@ -1,0 +1,5 @@
+error: `{ ... }` splice is not allowed in `button`
+ --> tests/ui/splice_in_button.rs:9:19
+  |
+9 |                 { "not allowed" }
+  |                   ^^^^^^^^^^^^^

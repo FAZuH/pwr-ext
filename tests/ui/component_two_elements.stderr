@@ -1,0 +1,5 @@
+error: `component!` takes exactly one element
+ --> tests/ui/component_two_elements.rs:6:9
+  |
+6 |         text_display { "b" }
+  |         ^^^^^^^^^^^^

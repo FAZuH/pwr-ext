@@ -1,0 +1,5 @@
+error: root attributes are not allowed in `component!` — attributes go inside the element body
+ --> tests/ui/component_root_attr.rs:4:26
+  |
+4 |     let _ = component! { content: "hello" };
+  |                          ^^^^^^^

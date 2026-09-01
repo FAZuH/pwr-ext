@@ -1,0 +1,17 @@
+error[E0271]: type mismatch resolving `<Vec<&str> as IntoIterator>::Item == CreateButton<'static>`
+ --> tests/ui/splice_wrong_item_type.rs:7:15
+  |
+5 |       let _ = view! {
+  |  _____________-
+6 | |         action_row {
+7 | |             { wrong }
+  | |               ^^^^^ expected `CreateButton<'_>`, found `&str`
+8 | |         }
+9 | |     };
+  | |_____- required by a bound introduced by this call
+  |
+note: required by a bound in `extend`
+ --> $RUST/core/src/iter/traits/collect.rs
+  |
+  |     fn extend<T: IntoIterator<Item = A>>(&mut self, iter: T);
+  |                               ^^^^^^^^ required by this bound in `Extend::extend`

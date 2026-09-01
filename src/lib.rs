@@ -68,11 +68,22 @@ pub mod poll;
 pub(crate) mod util;
 
 #[cfg(feature = "macros")]
+pub use pwr_ext_macros::component;
+#[cfg(feature = "macros")]
 pub use pwr_ext_macros::view;
 
 /// Re-exports of serenity builder and model types referenced by the `view!`
 /// macro's generated code. Call sites never need a direct `serenity`
 /// dependency; the macro always emits `::pwr_ext::view_support::…` paths.
+///
+/// The module also hosts the runtime child-rule checks: panicking
+/// counterparts of the child rules `view!` enforces at compile time for
+/// literal children, for child lists assembled at runtime. Each check
+/// carries the violated law in its panic message. These helpers are the
+/// documented exception to the crate's public-surface rule (see
+/// CONTEXT.md): they are `pub` because the macro expands in the dependee's
+/// crate and the generated code must reach them via
+/// `::pwr_ext::view_support::*`.
 pub mod view_support {
     pub use serenity::builder::CreateActionRow;
     pub use serenity::builder::CreateAllowedMentions;
@@ -106,6 +117,150 @@ pub mod view_support {
     pub use serenity::model::channel::MessageFlags;
     pub use serenity::model::channel::PollLayoutType;
     pub use serenity::model::channel::ReactionType;
+
+    /// Checks a runtime-assembled action-row button list against the
+    /// `action_row` child rule the `view!` macro enforces at compile time
+    /// for literal children: an action row holds up to 5 buttons or exactly
+    /// one select menu — never both, and never an empty row.
+    ///
+    /// The buttons-vs-select-menu laws are structural in
+    /// [`CreateActionRow`]: `CreateActionRow::buttons` and
+    /// `CreateActionRow::select_menu` are mutually exclusive, and a
+    /// select-menu row holds exactly one menu. This check enforces the laws
+    /// a button list can violate.
+    ///
+    /// # Panics
+    ///
+    /// Panics when the list violates a law, with the law in the message:
+    ///
+    /// - no button and no select menu (an empty list builds an empty row)
+    /// - more than 5 buttons
+    pub fn check_action_row_children(buttons: &[CreateButton<'_>]) {
+        if buttons.is_empty() {
+            panic!("action_row must contain at least one button or a select menu");
+        }
+        if buttons.len() > 5 {
+            panic!("action_row cannot contain more than 5 buttons");
+        }
+    }
+
+    /// Checks runtime-assembled section children against the `section` child
+    /// rule the `view!` macro enforces at compile time for literal children:
+    /// 1 to 3 text displays plus exactly one accessory.
+    ///
+    /// The accessory is a separate argument, as in [`CreateSection::new`],
+    /// so the exactly-one-accessory and text-displays-before-accessory laws
+    /// are structural; the text-display count is what this check enforces.
+    ///
+    /// # Panics
+    ///
+    /// Panics when the children violate a law, with the law in the message:
+    ///
+    /// - no text display
+    /// - more than 3 text displays
+    /// - no accessory
+    pub fn check_section_children(
+        text_displays: &[CreateSectionComponent<'_>],
+        accessory: Option<&CreateSectionAccessory<'_>>,
+    ) {
+        if text_displays.is_empty() {
+            panic!("section must contain at least one `text_display`");
+        }
+        if text_displays.len() > 3 {
+            panic!("section cannot contain more than 3 text_display components");
+        }
+        if accessory.is_none() {
+            panic!("section requires exactly one accessory (`thumbnail` or `button`)");
+        }
+    }
+
+    /// Checks runtime-assembled string-select options against the
+    /// select-menu law the `view!` macro enforces at compile time for
+    /// literal children: at most 25 options. The macro enforces no minimum,
+    /// so this check does not either.
+    ///
+    /// # Panics
+    ///
+    /// Panics when the list holds more than 25 options, with the law in the
+    /// message.
+    pub fn check_select_menu_options(options: &[CreateSelectMenuOption<'_>]) {
+        if options.len() > 25 {
+            panic!("select menu cannot have more than 25 options");
+        }
+    }
+
+    /// Checks runtime-assembled media-gallery items against the
+    /// `media_gallery` child rule the `view!` macro enforces at compile time
+    /// for literal children: 1 to 10 items.
+    ///
+    /// # Panics
+    ///
+    /// Panics when the list violates a law, with the law in the message:
+    ///
+    /// - no items
+    /// - more than 10 items
+    pub fn check_media_gallery_items(items: &[CreateMediaGalleryItem<'_>]) {
+        if items.is_empty() {
+            panic!("media_gallery must contain at least one `media_gallery_item`");
+        }
+        if items.len() > 10 {
+            panic!("media_gallery cannot contain more than 10 items");
+        }
+    }
+
+    /// Checks runtime-assembled container children against the container
+    /// child rule the `view!` macro enforces at compile time for literal
+    /// children.
+    ///
+    /// The rule's kind laws are structural in [`CreateContainerComponent`]:
+    /// the enum has no `Container` variant, so a nested container cannot be
+    /// expressed, and every variant is a legal container child. An empty
+    /// child list is legal, mirroring the macro. The count law is what this
+    /// check enforces: Discord caps a components-v2 message at 40 components
+    /// in total, which no parent with more than 40 direct children can
+    /// satisfy.
+    ///
+    /// # Panics
+    ///
+    /// Panics when the list holds more than 40 children, with the law in the
+    /// message.
+    pub fn check_container_children(children: &[CreateContainerComponent<'_>]) {
+        if children.len() > 40 {
+            panic!("container cannot contain more than 40 components");
+        }
+    }
+
+    /// Checks runtime-assembled `components_v2` root children against the
+    /// root child rule the `view!` macro enforces at compile time for
+    /// literal children: at least one component, v2 child kinds only, and at
+    /// most 40 direct children (Discord caps a components-v2 message at 40
+    /// components in total, which no root with more than 40 direct children
+    /// can satisfy).
+    ///
+    /// Every [`CreateComponent`] variant except `Label` is a legal v2 root
+    /// child, so the kind law rejects modal-only labels.
+    ///
+    /// # Panics
+    ///
+    /// Panics when the children violate a law, with the law in the message:
+    ///
+    /// - a modal-only `label` child
+    /// - no children at all
+    /// - more than 40 children
+    pub fn check_v2_root_children(children: &[CreateComponent<'_>]) {
+        if children
+            .iter()
+            .any(|child| matches!(child, CreateComponent::Label(_)))
+        {
+            panic!("`label` cannot appear inside `components_v2` — labels are modal-only");
+        }
+        if children.is_empty() {
+            panic!("`components_v2` must contain at least one component");
+        }
+        if children.len() > 40 {
+            panic!("components_v2 cannot contain more than 40 components");
+        }
+    }
 }
 
 /// Every wrapper type this crate provides, plus `serde::Deserialize` for

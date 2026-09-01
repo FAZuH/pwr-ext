@@ -1,0 +1,5 @@
+error: `components_v2` is a message root — use `view!` to build a full message; `component!` emits a single bare builder
+ --> tests/ui/component_components_v2.rs:4:26
+  |
+4 |     let _ = component! { components_v2 { text_display { "hi" } } };
+  |                          ^^^^^^^^^^^^^

@@ -1,0 +1,5 @@
+error: splice cannot appear alongside `components_v2` — use one family per `view!`
+ --> tests/ui/splice_alongside_components_v2.rs:9:11
+  |
+9 |         { extra }
+  |           ^^^^^

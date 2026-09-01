@@ -1,0 +1,5 @@
+error: action_row cannot contain both buttons and a select menu
+ --> tests/ui/splice_action_row_with_select_menu.rs:7:13
+  |
+7 |             select_menu { custom_id: "s" }
+  |             ^^^^^^^^^^^

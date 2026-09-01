@@ -1,0 +1,5 @@
+error: unknown element `buton` in `component!` — did you mean `button`?
+ --> tests/ui/component_unknown_element.rs:4:26
+  |
+4 |     let _ = component! { buton { custom_id: "b", label: "B" } };
+  |                          ^^^^^

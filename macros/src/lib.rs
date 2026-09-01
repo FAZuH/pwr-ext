@@ -37,6 +37,118 @@ pub fn view(input: TokenStream) -> TokenStream {
         .into()
 }
 
+/// Emit a single bare serenity builder from one element body.
+///
+/// `component!` takes exactly one element — any element `view!` accepts as a
+/// child — and emits the bare builder for it, ready to be composed into a
+/// runtime-assembled parent. Unlike [`view`], it does not produce a
+/// `CreateMessage`; the consumer wraps the result in the parent's enum
+/// variant explicitly (decision D2 — no contextual `Into` conversions):
+///
+/// ```text
+/// // component! emits the bare builder; the consumer wraps it explicitly:
+/// let row = component! { action_row { button { custom_id: "nav:1", label: "Home" } } };
+/// let msg = CreateMessage::new().components(vec![CreateComponent::ActionRow(row)]);
+/// ```
+///
+/// The same element maps to different enum wraps per parent (`action_row` is
+/// `CreateComponent::ActionRow` at the message root but
+/// `CreateContainerComponent::ActionRow` inside a `container`), so
+/// `component!` always emits the bare builder and leaves the wrapping to the
+/// call site. Splices inside the element body behave exactly as in `view!`.
+#[proc_macro]
+pub fn component(input: TokenStream) -> TokenStream {
+    let parsed = syn::parse_macro_input!(input as ViewInput);
+    expand_component(&parsed)
+        .unwrap_or_else(syn::Error::into_compile_error)
+        .into()
+}
+
+fn expand_component(input: &ViewInput) -> syn::Result<proc_macro2::TokenStream> {
+    let mut element: Option<(&syn::Ident, &ViewBody)> = None;
+    for item in &input.items {
+        match item {
+            ViewItem::Element { name, body } => {
+                if element.is_some() {
+                    return Err(syn::Error::new_spanned(
+                        name,
+                        "`component!` takes exactly one element",
+                    ));
+                }
+                element = Some((name, body));
+            }
+            ViewItem::Attr { key, .. } => {
+                return Err(syn::Error::new_spanned(
+                    key,
+                    "root attributes are not allowed in `component!` — attributes go inside the element body",
+                ));
+            }
+            ViewItem::Bare(lit) => {
+                return Err(syn::Error::new_spanned(
+                    lit,
+                    "bare strings are not allowed at the root of `component!` — use `text_display { \"...\" }`",
+                ));
+            }
+            ViewItem::Splice { span, .. } => {
+                return Err(syn::Error::new(
+                    *span,
+                    "splices are not allowed at the root of `component!` — put them inside the element body",
+                ));
+            }
+        }
+    }
+    let (name, body) = element.ok_or_else(|| {
+        syn::Error::new(
+            proc_macro2::Span::call_site(),
+            "`component!` takes exactly one element, e.g. `component! { action_row { ... } }`",
+        )
+    })?;
+    let n = name.to_string();
+    match n.as_str() {
+        "action_row" => expand_action_row(body),
+        "text_display" => expand_text_display(body),
+        "container" => expand_container(body),
+        "section" => expand_section(body),
+        "thumbnail" => expand_thumbnail(body),
+        "media_gallery" => expand_media_gallery(body),
+        "file" => expand_file(body),
+        "separator" => expand_separator(body),
+        "embed" => expand_embed(body),
+        "button" => expand_button(body),
+        "select_menu" => expand_select_menu(body, "select_menu"),
+        "select_menu_option" => expand_select_menu_option(body),
+        "poll" => expand_poll(body),
+        "poll_answer" => expand_poll_answer(body),
+        "components_v2" => Err(syn::Error::new_spanned(
+            name,
+            "`components_v2` is a message root — use `view!` to build a full message; `component!` emits a single bare builder",
+        )),
+        _ => {
+            let known = [
+                "action_row",
+                "text_display",
+                "container",
+                "section",
+                "thumbnail",
+                "media_gallery",
+                "file",
+                "separator",
+                "embed",
+                "button",
+                "select_menu",
+                "select_menu_option",
+                "poll",
+                "poll_answer",
+            ];
+            let mut msg = format!("unknown element `{n}` in `component!`");
+            if let Some(s) = did_you_mean(&n, &known) {
+                msg.push_str(&format!(" — did you mean `{s}`?"));
+            }
+            Err(syn::Error::new_spanned(name, msg))
+        }
+    }
+}
+
 fn expand(input: &ViewInput) -> syn::Result<proc_macro2::TokenStream> {
     // Detect family
     let has_v2 = input
@@ -47,6 +159,7 @@ fn expand(input: &ViewInput) -> syn::Result<proc_macro2::TokenStream> {
         ViewItem::Element { name, .. } => name != "components_v2",
         ViewItem::Attr { .. } => true,
         ViewItem::Bare(_) => true,
+        ViewItem::Splice { .. } => true,
     });
     if has_v2 {
         if has_legacy_outside_v2 {
@@ -71,6 +184,12 @@ fn expand(input: &ViewInput) -> syn::Result<proc_macro2::TokenStream> {
                         return Err(syn::Error::new_spanned(
                             lit,
                             "bare string cannot appear alongside `components_v2`",
+                        ));
+                    }
+                    ViewItem::Splice { span, .. } => {
+                        return Err(syn::Error::new(
+                            *span,
+                            "splice cannot appear alongside `components_v2` — use one family per `view!`",
                         ));
                     }
                     _ => {}
@@ -113,7 +232,7 @@ fn expand_legacy_root(input: &ViewInput) -> syn::Result<proc_macro2::TokenStream
     let mut flags: Option<&Expr> = None;
     let mut sticker_ids: Option<&Expr> = None;
     let mut embeds: Vec<proc_macro2::TokenStream> = Vec::new();
-    let mut components: Vec<proc_macro2::TokenStream> = Vec::new();
+    let mut components: Vec<VecStep> = Vec::new();
     let mut poll: Option<proc_macro2::TokenStream> = None;
     let mut allowed_mentions: Option<proc_macro2::TokenStream> = None;
 
@@ -180,9 +299,9 @@ fn expand_legacy_root(input: &ViewInput) -> syn::Result<proc_macro2::TokenStream
                     "action_row" => {
                         let ar = expand_action_row(body)?;
                         // Legacy components are CreateComponent::ActionRow
-                        components.push(
+                        components.push(VecStep::Push(
                             quote! { ::pwr_ext::view_support::CreateComponent::ActionRow(#ar) },
-                        );
+                        ));
                     }
                     "allowed_mentions" => {
                         if allowed_mentions.is_some() {
@@ -225,6 +344,9 @@ fn expand_legacy_root(input: &ViewInput) -> syn::Result<proc_macro2::TokenStream
                     }
                 }
             }
+            ViewItem::Splice { expr, .. } => {
+                components.push(VecStep::Extend(expr.clone()));
+            }
             ViewItem::Bare(lit) => {
                 return Err(syn::Error::new_spanned(
                     lit,
@@ -251,7 +373,20 @@ fn expand_legacy_root(input: &ViewInput) -> syn::Result<proc_macro2::TokenStream
         msg = quote! { #msg .allowed_mentions(#v) };
     }
     if !components.is_empty() {
-        msg = quote! { #msg .components(vec![#(#components),*]) };
+        // Legacy message components have no runtime law check; the checked
+        // path still builds the owned vec positionally when a splice is
+        // present, and the literal path stays a direct vec.
+        let children = build_child_list(
+            "__view_components",
+            quote! { ::pwr_ext::view_support::CreateComponent<'static> },
+            &components,
+            None,
+            None,
+            None,
+            None,
+            None,
+        );
+        msg = quote! { #msg .components(#children) };
     }
     if let Some(v) = sticker_ids {
         msg = quote! { #msg .sticker_ids(#v) };
@@ -273,7 +408,7 @@ fn expand_legacy_root(input: &ViewInput) -> syn::Result<proc_macro2::TokenStream
 fn expand_v2_root(body: &ViewBody) -> syn::Result<proc_macro2::TokenStream> {
     // v2 root may have `flags` attr and components
     let mut flags: Option<&Expr> = None;
-    let mut components: Vec<proc_macro2::TokenStream> = Vec::new();
+    let mut components: Vec<VecStep> = Vec::new();
 
     for item in &body.items {
         match item {
@@ -359,7 +494,10 @@ fn expand_v2_root(body: &ViewBody) -> syn::Result<proc_macro2::TokenStream> {
                         return Err(syn::Error::new_spanned(name, msg));
                     }
                 };
-                components.push(comp);
+                components.push(VecStep::Push(comp));
+            }
+            ViewItem::Splice { expr, .. } => {
+                components.push(VecStep::Extend(expr.clone()));
             }
             ViewItem::Bare(lit) => {
                 return Err(syn::Error::new_spanned(
@@ -370,7 +508,8 @@ fn expand_v2_root(body: &ViewBody) -> syn::Result<proc_macro2::TokenStream> {
         }
     }
 
-    if components.is_empty() {
+    let has_splices = has_splice(&components);
+    if !has_splices && components.is_empty() {
         return Err(syn::Error::new(
             proc_macro2::Span::call_site(),
             "`components_v2` must contain at least one component",
@@ -384,11 +523,119 @@ fn expand_v2_root(body: &ViewBody) -> syn::Result<proc_macro2::TokenStream> {
         quote! { ::pwr_ext::view_support::MessageFlags::from_bits_truncate(1 << 15) }
     };
 
+    let comps = {
+        let children = build_child_list(
+            "__view_children",
+            quote! { ::pwr_ext::view_support::CreateComponent<'static> },
+            &components,
+            Some(&quote! { ::pwr_ext::view_support::check_v2_root_children }),
+            None,
+            None,
+            None,
+            None,
+        );
+        quote! { .components(#children) }
+    };
+
     Ok(quote! {
         ::pwr_ext::view_support::CreateMessage::new()
             .flags(#flag_expr)
-            .components(vec![#(#components),*])
+            #comps
     })
+}
+
+fn splice_not_allowed(where_: &str, span: &proc_macro2::Span) -> syn::Error {
+    syn::Error::new(
+        *span,
+        format!("`{{ ... }}` splice is not allowed in {where_}"),
+    )
+}
+
+/// One position in a runtime-assembled child list: either a literal child
+/// (pushed in author order) or a `{ expr }` splice (extended at its author
+/// position). The item type of the splice's `IntoIterator` must match the
+/// list's element type; `Option<T>` covers the conditional 0-or-1 child.
+enum VecStep {
+    Push(proc_macro2::TokenStream),
+    Extend(Expr),
+}
+
+fn has_splice(steps: &[VecStep]) -> bool {
+    steps.iter().any(|s| matches!(s, VecStep::Extend(_)))
+}
+
+/// The literal child tokens of a parent's child list, in author order —
+/// the `vec![...]` element list for the literal-only emission path.
+fn literal_steps(steps: &[VecStep]) -> Vec<&proc_macro2::TokenStream> {
+    steps
+        .iter()
+        .filter_map(|s| match s {
+            VecStep::Push(tokens) => Some(tokens),
+            VecStep::Extend(_) => None,
+        })
+        .collect()
+}
+
+/// The child-list expression of a parent: a literal `vec![...]` when the
+/// list holds no splice, else a runtime block that assembles the list
+/// positionally (literals pushed, splices extended in author order), runs
+/// the optional runtime-law check over the combined slice, then evaluates
+/// to the Vec (or to `tail` when given). Only parents containing a splice
+/// take the block path, so literal-only parents keep their direct
+/// `vec![...]` emission.
+///
+/// `literal` overrides the literal-only token list; embed's plain-tuple
+/// form differs from the Into-wrapped form carried in its `VecStep` list.
+/// `bind` runs before the Vec declaration and `check_extra` appends a second
+/// argument to the check call: `expand_section` binds its accessory to a
+/// local so the check can borrow it and `CreateSection::new` can move it.
+/// `bind`, `check_extra`, and `tail` serve only `expand_section`; `literal`
+/// serves only embed's field tuples. Keeping them here is what lets every
+/// parent share one splice-scanning, check-then-build helper.
+#[allow(clippy::too_many_arguments)]
+fn build_child_list(
+    var: &str,
+    elem_ty: proc_macro2::TokenStream,
+    steps: &[VecStep],
+    check: Option<&proc_macro2::TokenStream>,
+    bind: Option<proc_macro2::TokenStream>,
+    check_extra: Option<proc_macro2::TokenStream>,
+    tail: Option<proc_macro2::TokenStream>,
+    literal: Option<&[proc_macro2::TokenStream]>,
+) -> proc_macro2::TokenStream {
+    if !has_splice(steps) {
+        let lits: Vec<&proc_macro2::TokenStream> = match literal {
+            Some(l) => l.iter().collect(),
+            None => literal_steps(steps),
+        };
+        return quote! { vec![#(#lits),*] };
+    }
+    let ident = syn::Ident::new(var, proc_macro2::Span::call_site());
+    let mut step_tokens = Vec::with_capacity(steps.len());
+    for step in steps {
+        match step {
+            VecStep::Push(tokens) => {
+                step_tokens.push(quote! { #ident.push(#tokens); });
+            }
+            VecStep::Extend(expr) => {
+                step_tokens.push(quote! { #ident.extend(#expr); });
+            }
+        }
+    }
+    let check_call = match (check, check_extra) {
+        (Some(c), Some(extra)) => quote! { #c(&#ident, #extra); },
+        (Some(c), None) => quote! { #c(&#ident); },
+        (None, _) => quote! {},
+    };
+    let bind = bind.unwrap_or_else(|| quote! {});
+    let tail = tail.unwrap_or_else(|| quote! { #ident });
+    quote! {{
+        #bind
+        let mut #ident: ::std::vec::Vec<#elem_ty> = ::std::vec::Vec::new();
+        #(#step_tokens)*
+        #check_call
+        #tail
+    }}
 }
 
 // --- embed ---
@@ -400,6 +647,7 @@ fn expand_embed(body: &ViewBody) -> syn::Result<proc_macro2::TokenStream> {
     let mut timestamp: Option<&Expr> = None;
     let mut colour: Option<&Expr> = None;
     let mut fields: Vec<proc_macro2::TokenStream> = Vec::new();
+    let mut field_steps: Vec<VecStep> = Vec::new();
     let mut author: Option<proc_macro2::TokenStream> = None;
     let mut footer: Option<proc_macro2::TokenStream> = None;
     let mut image: Option<proc_macro2::TokenStream> = None;
@@ -461,7 +709,9 @@ fn expand_embed(body: &ViewBody) -> syn::Result<proc_macro2::TokenStream> {
                 let n = name.to_string();
                 match n.as_str() {
                     "field" => {
-                        fields.push(expand_embed_field(body)?);
+                        let (plain, into_wrapped) = expand_embed_field(body)?;
+                        fields.push(plain);
+                        field_steps.push(VecStep::Push(into_wrapped));
                     }
                     "author" => {
                         if author.is_some() {
@@ -496,6 +746,11 @@ fn expand_embed(body: &ViewBody) -> syn::Result<proc_macro2::TokenStream> {
                         return Err(syn::Error::new_spanned(name, msg));
                     }
                 }
+            }
+            ViewItem::Splice { expr, .. } => {
+                // Embed splices contribute fields (name, value, inline);
+                // author/footer/image/thumbnail stay literal-only.
+                field_steps.push(VecStep::Extend(expr.clone()));
             }
             ViewItem::Bare(lit) => {
                 return Err(syn::Error::new_spanned(
@@ -550,14 +805,25 @@ fn expand_embed(body: &ViewBody) -> syn::Result<proc_macro2::TokenStream> {
     if let Some(v) = thumbnail {
         tokens = quote! { #tokens #v };
     }
-    if !fields.is_empty() {
-        // fields are tuples (name, value, inline)
-        tokens = quote! { #tokens .fields(vec![#(#fields),*]) };
+    if !field_steps.is_empty() {
+        let fields_expr = build_child_list(
+            "__view_fields",
+            quote! { (::std::string::String, ::std::string::String, bool) },
+            &field_steps,
+            None,
+            None,
+            None,
+            None,
+            Some(&fields),
+        );
+        tokens = quote! { #tokens .fields(#fields_expr) };
     }
     Ok(tokens)
 }
 
-fn expand_embed_field(body: &ViewBody) -> syn::Result<proc_macro2::TokenStream> {
+fn expand_embed_field(
+    body: &ViewBody,
+) -> syn::Result<(proc_macro2::TokenStream, proc_macro2::TokenStream)> {
     let mut name: Option<&Expr> = None;
     let mut value: Option<&Expr> = None;
     let mut inline: Option<&Expr> = None;
@@ -600,6 +866,9 @@ fn expand_embed_field(body: &ViewBody) -> syn::Result<proc_macro2::TokenStream> 
                     format!("field cannot contain element `{name}`"),
                 ));
             }
+            ViewItem::Splice { span, .. } => {
+                return Err(splice_not_allowed("`field`", span));
+            }
             ViewItem::Bare(lit) => {
                 return Err(syn::Error::new_spanned(
                     lit,
@@ -617,8 +886,12 @@ fn expand_embed_field(body: &ViewBody) -> syn::Result<proc_macro2::TokenStream> 
     } else {
         quote! { false }
     };
-    // Return tuple for .fields
-    Ok(quote! { (#name, #value, #inline_tokens) })
+    // Return tuple for .fields: (plain, into_wrapped)
+    // into_wrapped uses Into::into so the splice path can unify with
+    // Vec<(String, String, bool)>.
+    let plain = quote! { (#name, #value, #inline_tokens) };
+    let into_wrapped = quote! { (::std::convert::Into::into(#name), ::std::convert::Into::into(#value), #inline_tokens) };
+    Ok((plain, into_wrapped))
 }
 
 fn expand_embed_author(body: &ViewBody) -> syn::Result<proc_macro2::TokenStream> {
@@ -663,6 +936,9 @@ fn expand_embed_author(body: &ViewBody) -> syn::Result<proc_macro2::TokenStream>
                     name,
                     format!("author cannot contain element `{name}`"),
                 ));
+            }
+            ViewItem::Splice { span, .. } => {
+                return Err(splice_not_allowed("`author`", span));
             }
             ViewItem::Bare(lit) => {
                 return Err(syn::Error::new_spanned(
@@ -720,6 +996,9 @@ fn expand_embed_footer(body: &ViewBody) -> syn::Result<proc_macro2::TokenStream>
                     format!("footer cannot contain element `{name}`"),
                 ));
             }
+            ViewItem::Splice { span, .. } => {
+                return Err(splice_not_allowed("`footer`", span));
+            }
             ViewItem::Bare(lit) => {
                 return Err(syn::Error::new_spanned(
                     lit,
@@ -775,6 +1054,9 @@ fn expand_embed_image(
                     name,
                     format!("image cannot contain element `{name}`"),
                 ));
+            }
+            ViewItem::Splice { span, .. } => {
+                return Err(splice_not_allowed("`image`/`thumbnail`", span));
             }
             ViewItem::Bare(lit) => {
                 return Err(syn::Error::new_spanned(
@@ -895,6 +1177,9 @@ fn expand_allowed_mentions(body: &ViewBody) -> syn::Result<proc_macro2::TokenStr
                     format!("allowed_mentions cannot contain element `{name}`"),
                 ));
             }
+            ViewItem::Splice { span, .. } => {
+                return Err(splice_not_allowed("`allowed_mentions`", span));
+            }
             ViewItem::Bare(lit) => {
                 return Err(syn::Error::new_spanned(
                     lit,
@@ -984,6 +1269,9 @@ fn expand_poll(body: &ViewBody) -> syn::Result<proc_macro2::TokenStream> {
                     }
                 }
             }
+            ViewItem::Splice { span, .. } => {
+                return Err(splice_not_allowed("`poll`", span));
+            }
             ViewItem::Bare(lit) => {
                 return Err(syn::Error::new_spanned(
                     lit,
@@ -1055,6 +1343,9 @@ fn expand_poll_answer(body: &ViewBody) -> syn::Result<proc_macro2::TokenStream> 
                     format!("poll_answer cannot contain element `{name}`"),
                 ));
             }
+            ViewItem::Splice { span, .. } => {
+                return Err(splice_not_allowed("`poll_answer`", span));
+            }
             ViewItem::Bare(lit) => {
                 return Err(syn::Error::new_spanned(
                     lit,
@@ -1076,8 +1367,15 @@ fn expand_poll_answer(body: &ViewBody) -> syn::Result<proc_macro2::TokenStream> 
 // --- action_row, button, select_menu ---
 
 fn expand_action_row(body: &ViewBody) -> syn::Result<proc_macro2::TokenStream> {
-    let mut buttons: Vec<proc_macro2::TokenStream> = Vec::new();
+    let mut buttons: Vec<VecStep> = Vec::new();
     let mut select_menu: Option<proc_macro2::TokenStream> = None;
+    // Decide once whether the row contains any splice, over ALL items, so
+    // the compile-vs-runtime count guard is order-independent: any splice
+    // anywhere defers the button limit to the runtime check.
+    let has_any_splice = body
+        .items
+        .iter()
+        .any(|item| matches!(item, ViewItem::Splice { .. }));
 
     for item in &body.items {
         match item {
@@ -1091,13 +1389,13 @@ fn expand_action_row(body: &ViewBody) -> syn::Result<proc_macro2::TokenStream> {
                                 "action_row cannot contain both buttons and a select menu",
                             ));
                         }
-                        if buttons.len() >= 5 {
+                        if !has_any_splice && buttons.len() >= 5 {
                             return Err(syn::Error::new_spanned(
                                 name,
                                 "action_row cannot contain more than 5 buttons",
                             ));
                         }
-                        buttons.push(expand_button(body)?);
+                        buttons.push(VecStep::Push(expand_button(body)?));
                     }
                     "select_menu" | "string_select" | "user_select" | "role_select"
                     | "mentionable_select" | "channel_select" => {
@@ -1137,6 +1435,15 @@ fn expand_action_row(body: &ViewBody) -> syn::Result<proc_macro2::TokenStream> {
                     format!("action_row cannot contain attribute `{key}`"),
                 ));
             }
+            ViewItem::Splice { expr, span } => {
+                if select_menu.is_some() {
+                    return Err(syn::Error::new(
+                        *span,
+                        "action_row cannot contain both buttons and a select menu",
+                    ));
+                }
+                buttons.push(VecStep::Extend(expr.clone()));
+            }
             ViewItem::Bare(lit) => {
                 return Err(syn::Error::new_spanned(
                     lit,
@@ -1147,12 +1454,19 @@ fn expand_action_row(body: &ViewBody) -> syn::Result<proc_macro2::TokenStream> {
     }
 
     if let Some(sm) = select_menu {
-        if buttons.is_empty() {
-            // ok
-        }
         Ok(quote! { ::pwr_ext::view_support::CreateActionRow::select_menu(#sm) })
     } else if !buttons.is_empty() {
-        Ok(quote! { ::pwr_ext::view_support::CreateActionRow::buttons(vec![#(#buttons),*]) })
+        let children = build_child_list(
+            "__view_buttons",
+            quote! { ::pwr_ext::view_support::CreateButton<'static> },
+            &buttons,
+            Some(&quote! { ::pwr_ext::view_support::check_action_row_children }),
+            None,
+            None,
+            None,
+            None,
+        );
+        Ok(quote! { ::pwr_ext::view_support::CreateActionRow::buttons(#children) })
     } else {
         Err(syn::Error::new(
             proc_macro2::Span::call_site(),
@@ -1240,6 +1554,9 @@ fn expand_button(body: &ViewBody) -> syn::Result<proc_macro2::TokenStream> {
                     name,
                     format!("button cannot contain element `{name}`"),
                 ));
+            }
+            ViewItem::Splice { span, .. } => {
+                return Err(splice_not_allowed("`button`", span));
             }
             ViewItem::Bare(lit) => {
                 return Err(syn::Error::new_spanned(
@@ -1471,6 +1788,9 @@ fn expand_select_menu(body: &ViewBody, kind_name: &str) -> syn::Result<proc_macr
                     }
                 }
             }
+            ViewItem::Splice { span, .. } => {
+                return Err(splice_not_allowed("`select_menu`", span));
+            }
             ViewItem::Bare(lit) => {
                 return Err(syn::Error::new_spanned(
                     lit,
@@ -1672,6 +1992,9 @@ fn expand_select_menu_option(body: &ViewBody) -> syn::Result<proc_macro2::TokenS
                     format!("option cannot contain element `{name}`"),
                 ));
             }
+            ViewItem::Splice { span, .. } => {
+                return Err(splice_not_allowed("`option`", span));
+            }
             ViewItem::Bare(lit) => {
                 return Err(syn::Error::new_spanned(
                     lit,
@@ -1728,6 +2051,9 @@ fn expand_text_display(body: &ViewBody) -> syn::Result<proc_macro2::TokenStream>
                     }
                     return Err(syn::Error::new_spanned(key, msg));
                 }
+            }
+            ViewItem::Splice { span, .. } => {
+                return Err(splice_not_allowed("`text_display`", span));
             }
             ViewItem::Bare(lit) => {
                 if content.is_some() || bare.is_some() {
@@ -1798,6 +2124,9 @@ fn expand_thumbnail(body: &ViewBody) -> syn::Result<proc_macro2::TokenStream> {
                     format!("thumbnail cannot contain element `{name}`"),
                 ));
             }
+            ViewItem::Splice { span, .. } => {
+                return Err(splice_not_allowed("`thumbnail`", span));
+            }
             ViewItem::Bare(lit) => {
                 return Err(syn::Error::new_spanned(
                     lit,
@@ -1820,13 +2149,13 @@ fn expand_thumbnail(body: &ViewBody) -> syn::Result<proc_macro2::TokenStream> {
 }
 
 fn expand_media_gallery(body: &ViewBody) -> syn::Result<proc_macro2::TokenStream> {
-    let mut items: Vec<proc_macro2::TokenStream> = Vec::new();
+    let mut items: Vec<VecStep> = Vec::new();
     for item in &body.items {
         match item {
             ViewItem::Element { name, body } => {
                 let n = name.to_string();
                 if n == "media_gallery_item" || n == "item" {
-                    items.push(expand_media_gallery_item(body)?);
+                    items.push(VecStep::Push(expand_media_gallery_item(body)?));
                 } else {
                     let known = ["media_gallery_item", "item"];
                     let mut msg = format!("unknown media_gallery child `{n}`");
@@ -1842,6 +2171,9 @@ fn expand_media_gallery(body: &ViewBody) -> syn::Result<proc_macro2::TokenStream
                     format!("media_gallery cannot contain attribute `{key}`"),
                 ));
             }
+            ViewItem::Splice { expr, .. } => {
+                items.push(VecStep::Extend(expr.clone()));
+            }
             ViewItem::Bare(lit) => {
                 return Err(syn::Error::new_spanned(
                     lit,
@@ -1850,19 +2182,30 @@ fn expand_media_gallery(body: &ViewBody) -> syn::Result<proc_macro2::TokenStream
             }
         }
     }
-    if items.is_empty() {
+    let has_splices = has_splice(&items);
+    if !has_splices && items.is_empty() {
         return Err(syn::Error::new(
             proc_macro2::Span::call_site(),
             "media_gallery must contain at least one `media_gallery_item`",
         ));
     }
-    if items.len() > 10 {
+    if !has_splices && items.len() > 10 {
         return Err(syn::Error::new(
             proc_macro2::Span::call_site(),
             "media_gallery cannot contain more than 10 items",
         ));
     }
-    Ok(quote! { ::pwr_ext::view_support::CreateMediaGallery::new(vec![#(#items),*]) })
+    let children = build_child_list(
+        "__view_items",
+        quote! { ::pwr_ext::view_support::CreateMediaGalleryItem<'static> },
+        &items,
+        Some(&quote! { ::pwr_ext::view_support::check_media_gallery_items }),
+        None,
+        None,
+        None,
+        None,
+    );
+    Ok(quote! { ::pwr_ext::view_support::CreateMediaGallery::new(#children) })
 }
 
 fn expand_media_gallery_item(body: &ViewBody) -> syn::Result<proc_macro2::TokenStream> {
@@ -1907,6 +2250,9 @@ fn expand_media_gallery_item(body: &ViewBody) -> syn::Result<proc_macro2::TokenS
                     name,
                     format!("media_gallery_item cannot contain element `{name}`"),
                 ));
+            }
+            ViewItem::Splice { span, .. } => {
+                return Err(splice_not_allowed("`media_gallery_item`", span));
             }
             ViewItem::Bare(lit) => {
                 return Err(syn::Error::new_spanned(
@@ -1982,6 +2328,9 @@ fn expand_file(body: &ViewBody) -> syn::Result<proc_macro2::TokenStream> {
                     format!("file cannot contain element `{name}`"),
                 ));
             }
+            ViewItem::Splice { span, .. } => {
+                return Err(splice_not_allowed("`file`", span));
+            }
             ViewItem::Bare(lit) => {
                 return Err(syn::Error::new_spanned(
                     lit,
@@ -2039,6 +2388,9 @@ fn expand_separator(body: &ViewBody) -> syn::Result<proc_macro2::TokenStream> {
                     format!("separator cannot contain element `{name}`"),
                 ));
             }
+            ViewItem::Splice { span, .. } => {
+                return Err(splice_not_allowed("`separator`", span));
+            }
             ViewItem::Bare(lit) => {
                 return Err(syn::Error::new_spanned(
                     lit,
@@ -2068,7 +2420,7 @@ fn expand_container(body: &ViewBody) -> syn::Result<proc_macro2::TokenStream> {
     let mut accent_color: Option<&Expr> = None;
     let mut accent_colour: Option<&Expr> = None;
     let mut spoiler: Option<&Expr> = None;
-    let mut components: Vec<proc_macro2::TokenStream> = Vec::new();
+    let mut components: Vec<VecStep> = Vec::new();
 
     for item in &body.items {
         match item {
@@ -2158,7 +2510,10 @@ fn expand_container(body: &ViewBody) -> syn::Result<proc_macro2::TokenStream> {
                         return Err(syn::Error::new_spanned(name, msg));
                     }
                 };
-                components.push(comp);
+                components.push(VecStep::Push(comp));
+            }
+            ViewItem::Splice { expr, .. } => {
+                components.push(VecStep::Extend(expr.clone()));
             }
             ViewItem::Bare(lit) => {
                 return Err(syn::Error::new_spanned(
@@ -2170,8 +2525,17 @@ fn expand_container(body: &ViewBody) -> syn::Result<proc_macro2::TokenStream> {
     }
 
     let accent = accent_color.or(accent_colour);
-    let mut tokens =
-        quote! { ::pwr_ext::view_support::CreateContainer::new(vec![#(#components),*]) };
+    let children = build_child_list(
+        "__view_children",
+        quote! { ::pwr_ext::view_support::CreateContainerComponent<'static> },
+        &components,
+        Some(&quote! { ::pwr_ext::view_support::check_container_children }),
+        None,
+        None,
+        None,
+        None,
+    );
+    let mut tokens = quote! { ::pwr_ext::view_support::CreateContainer::new(#children) };
     if let Some(v) = accent {
         tokens = quote! { #tokens .accent_colour(#v) };
     }
@@ -2182,8 +2546,14 @@ fn expand_container(body: &ViewBody) -> syn::Result<proc_macro2::TokenStream> {
 }
 
 fn expand_section(body: &ViewBody) -> syn::Result<proc_macro2::TokenStream> {
-    let mut text_displays: Vec<proc_macro2::TokenStream> = Vec::new();
+    let mut text_displays: Vec<VecStep> = Vec::new();
     let mut accessory: Option<proc_macro2::TokenStream> = None;
+    // Decide once, over ALL items, whether the section contains any splice.
+    // The count guard and the compile-vs-runtime branch share this boolean.
+    let has_any_splice = body
+        .items
+        .iter()
+        .any(|item| matches!(item, ViewItem::Splice { .. }));
 
     for item in &body.items {
         match item {
@@ -2191,7 +2561,7 @@ fn expand_section(body: &ViewBody) -> syn::Result<proc_macro2::TokenStream> {
                 let n = name.to_string();
                 match n.as_str() {
                     "text_display" => {
-                        if text_displays.len() >= 3 {
+                        if !has_any_splice && text_displays.len() >= 3 {
                             return Err(syn::Error::new_spanned(
                                 name,
                                 "section cannot contain more than 3 text_display components",
@@ -2203,7 +2573,10 @@ fn expand_section(body: &ViewBody) -> syn::Result<proc_macro2::TokenStream> {
                                 "`text_display` must appear before accessory in `section`",
                             ));
                         }
-                        text_displays.push(expand_text_display(body)?);
+                        let td = expand_text_display(body)?;
+                        text_displays.push(VecStep::Push(
+                            quote! { ::pwr_ext::view_support::CreateSectionComponent::TextDisplay(#td) },
+                        ));
                     }
                     "thumbnail" => {
                         if accessory.is_some() {
@@ -2245,6 +2618,11 @@ fn expand_section(body: &ViewBody) -> syn::Result<proc_macro2::TokenStream> {
                     format!("section cannot contain attribute `{key}`"),
                 ));
             }
+            ViewItem::Splice { expr, .. } => {
+                // Section splices contribute text displays; the accessory
+                // position stays literal-only (exactly-one is not a list).
+                text_displays.push(VecStep::Extend(expr.clone()));
+            }
             ViewItem::Bare(lit) => {
                 return Err(syn::Error::new_spanned(
                     lit,
@@ -2254,7 +2632,7 @@ fn expand_section(body: &ViewBody) -> syn::Result<proc_macro2::TokenStream> {
         }
     }
 
-    if text_displays.is_empty() {
+    if !has_any_splice && text_displays.is_empty() {
         return Err(syn::Error::new(
             proc_macro2::Span::call_site(),
             "section must contain at least one `text_display`",
@@ -2267,11 +2645,23 @@ fn expand_section(body: &ViewBody) -> syn::Result<proc_macro2::TokenStream> {
         )
     })?;
 
-    // Wrap text_displays as CreateSectionComponent::TextDisplay
-    let wrapped: Vec<proc_macro2::TokenStream> = text_displays
-        .into_iter()
-        .map(|td| quote! { ::pwr_ext::view_support::CreateSectionComponent::TextDisplay(#td) })
-        .collect();
-
-    Ok(quote! { ::pwr_ext::view_support::CreateSection::new(vec![#(#wrapped),*], #acc) })
+    if has_any_splice {
+        // Bind the accessory to a local: the check borrows it, then the
+        // builder takes it by value.
+        Ok(build_child_list(
+            "__view_children",
+            quote! { ::pwr_ext::view_support::CreateSectionComponent<'static> },
+            &text_displays,
+            Some(&quote! { ::pwr_ext::view_support::check_section_children }),
+            Some(quote! { let __view_accessory = #acc; }),
+            Some(quote! { ::std::option::Option::Some(&__view_accessory) }),
+            Some(
+                quote! { ::pwr_ext::view_support::CreateSection::new(__view_children, __view_accessory) },
+            ),
+            None,
+        ))
+    } else {
+        let lits = literal_steps(&text_displays);
+        Ok(quote! { ::pwr_ext::view_support::CreateSection::new(vec![#(#lits),*], #acc) })
+    }
 }

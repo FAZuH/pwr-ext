@@ -27,7 +27,19 @@ name = "view_macros"
 required-features = ["macros"]
 
 [[test]]
+name = "view_splices"
+required-features = ["macros"]
+
+[[test]]
 name = "trybuild"
+required-features = ["macros"]
+
+[[test]]
+name = "component_macros"
+required-features = ["macros"]
+
+[[test]]
+name = "hub_acceptance"
 required-features = ["macros"]
 
 [dev-dependencies]

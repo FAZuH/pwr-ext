@@ -7,11 +7,13 @@ use syn::Token;
 use syn::braced;
 use syn::parse::Parse;
 use syn::parse::ParseStream;
+use syn::spanned::Spanned as _;
 
 pub enum ViewItem {
     Attr { key: Ident, value: Expr },
     Element { name: Ident, body: ViewBody },
     Bare(LitStr),
+    Splice { expr: Expr, span: proc_macro2::Span },
 }
 
 pub struct ViewInput {
@@ -70,6 +72,14 @@ impl Parse for ViewInput {
                     ));
                 }
             }
+            if input.peek(syn::token::Brace) {
+                let splice = parse_splice(input)?;
+                if input.peek(Token![,]) {
+                    input.parse::<Token![,]>()?;
+                }
+                items.push(splice);
+                continue;
+            }
             // If none matched, produce a helpful error pointing at the next token.
             let lookahead = input.lookahead1();
             return Err(lookahead.error());
@@ -119,11 +129,40 @@ impl Parse for ViewBody {
                     ));
                 }
             }
+            if input.peek(syn::token::Brace) {
+                let splice = parse_splice(input)?;
+                if input.peek(Token![,]) {
+                    input.parse::<Token![,]>()?;
+                }
+                items.push(splice);
+                continue;
+            }
             let lookahead = input.lookahead1();
             return Err(lookahead.error());
         }
         Ok(Self { items })
     }
+}
+
+/// Parses a `{ expr }` splice item: one expression inside a brace group, an
+/// optional trailing comma inside the braces, and nothing else.
+fn parse_splice(input: ParseStream) -> syn::Result<ViewItem> {
+    let content;
+    braced!(content in input);
+    if content.is_empty() {
+        return Err(content.error("expected an expression inside `{ ... }` splice"));
+    }
+    let expr: Expr = content.parse()?;
+    if content.peek(Token![,]) {
+        content.parse::<Token![,]>()?;
+    }
+    if !content.is_empty() {
+        return Err(content.error("expected a single expression inside `{ ... }` splice"));
+    }
+    Ok(ViewItem::Splice {
+        span: expr.span(),
+        expr,
+    })
 }
 
 /// Simple edit-distance helper for "did you mean?" suggestions.
@@ -185,6 +224,10 @@ mod tests {
             Some(ViewItem::Element { body, .. }) => Ok(body),
             _ => panic!("expected dummy element"),
         }
+    }
+
+    fn expr_str(expr: &Expr) -> String {
+        quote::quote! { #expr }.to_string().replace(' ', "")
     }
 
     #[test]
@@ -321,5 +364,126 @@ mod tests {
         let body =
             parse_body(r#"title: "hi", field { name: "n", value: "v", inline: true }"#).unwrap();
         assert_eq!(body.items.len(), 2);
+    }
+
+    #[test]
+    fn splice_parses_at_top_level() {
+        let vi = parse("{ buttons_vec }").unwrap();
+        assert_eq!(vi.items.len(), 1);
+        match &vi.items[0] {
+            ViewItem::Splice { expr, .. } => {
+                assert_eq!(expr_str(expr), "buttons_vec");
+            }
+            _ => panic!("expected splice"),
+        }
+    }
+
+    #[test]
+    fn splice_parses_in_body_between_elements() {
+        let body = parse_body(r#"text_display { "a" } { items } text_display { "b" }"#).unwrap();
+        assert_eq!(body.items.len(), 3);
+        assert!(matches!(body.items[0], ViewItem::Element { .. }));
+        assert!(matches!(&body.items[1], ViewItem::Splice { .. }));
+        assert!(matches!(body.items[2], ViewItem::Element { .. }));
+    }
+
+    #[test]
+    fn splice_after_element_body_without_comma() {
+        let body = parse_body(r#"button { label: "x" } { more_buttons }"#).unwrap();
+        assert_eq!(body.items.len(), 2);
+        assert!(matches!(body.items[0], ViewItem::Element { .. }));
+        assert!(matches!(&body.items[1], ViewItem::Splice { .. }));
+    }
+
+    #[test]
+    fn splice_keeps_expr_tokens_verbatim() {
+        let vi = parse(r#"{ make_children(prefix.to_owned() + "?") }"#).unwrap();
+        match &vi.items[0] {
+            ViewItem::Splice { expr, .. } => {
+                assert_eq!(expr_str(expr), "make_children(prefix.to_owned()+\"?\")");
+            }
+            _ => panic!("expected splice"),
+        }
+    }
+
+    #[test]
+    fn splice_allows_trailing_comma_inside_braces() {
+        let vi = parse("{ options, }").unwrap();
+        assert!(matches!(&vi.items[0], ViewItem::Splice { .. }));
+    }
+
+    #[test]
+    fn two_consecutive_splices() {
+        let body = parse_body("{ a } { b }").unwrap();
+        assert_eq!(body.items.len(), 2);
+        assert!(matches!(&body.items[0], ViewItem::Splice { .. }));
+        assert!(matches!(&body.items[1], ViewItem::Splice { .. }));
+    }
+
+    #[test]
+    fn splice_rejects_empty_braces() {
+        match parse("{ }") {
+            Err(e) => {
+                let msg = e.to_string();
+                assert!(msg.contains("expected an expression inside"), "got: {msg}");
+            }
+            Ok(_) => panic!("expected error"),
+        }
+    }
+
+    #[test]
+    fn splice_rejects_multiple_expressions() {
+        match parse("{ a b }") {
+            Err(e) => {
+                let msg = e.to_string();
+                assert!(msg.contains("expected a single expression"), "got: {msg}");
+            }
+            Ok(_) => panic!("expected error"),
+        }
+    }
+
+    #[test]
+    fn attr_brace_value_still_parses() {
+        let vi = parse(r#"content: { format!("x") }"#).unwrap();
+        assert_eq!(vi.items.len(), 1);
+        match &vi.items[0] {
+            ViewItem::Attr { key, value } => {
+                assert_eq!(key.to_string(), "content");
+                assert!(matches!(value, Expr::Block(_)));
+            }
+            _ => panic!("expected attr"),
+        }
+    }
+
+    #[test]
+    fn attr_brace_value_then_splice() {
+        let vi = parse(r#"content: { "x" } { buttons }"#).unwrap();
+        assert_eq!(vi.items.len(), 2);
+        assert!(matches!(vi.items[0], ViewItem::Attr { .. }));
+        assert!(matches!(&vi.items[1], ViewItem::Splice { .. }));
+    }
+
+    #[test]
+    fn element_body_attr_and_splice_interleaved() {
+        let body = parse_body(
+            r#"title: { "t" } { fields_vec } field { name: "n", value: "v", inline: true }"#,
+        )
+        .unwrap();
+        assert_eq!(body.items.len(), 3);
+        assert!(matches!(body.items[0], ViewItem::Attr { .. }));
+        assert!(matches!(&body.items[1], ViewItem::Splice { .. }));
+        assert!(matches!(body.items[2], ViewItem::Element { .. }));
+    }
+
+    #[test]
+    fn splice_with_call_expr_and_trailing_element_comma() {
+        let body = parse_body("{ nav_row(), }, text_display { \"x\" }").unwrap();
+        assert_eq!(body.items.len(), 2);
+        match &body.items[0] {
+            ViewItem::Splice { expr, .. } => {
+                assert_eq!(expr_str(expr), "nav_row()");
+            }
+            _ => panic!("expected splice"),
+        }
     }
 }
