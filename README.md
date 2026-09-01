@@ -136,6 +136,67 @@ let v2 = view! {
 
 Two families are statically separated: mixing `content`/`embed` with `components_v2` is a compile error. Literal checks (button style laws, `action_row` ≤5 buttons or 1 select, `section` 1–3 text displays + 1 accessory, `select_menu` ≤25 options) fire at compile time; dynamic values degrade to runtime validation. Generated code references only `::pwr_ext::view_support`, so call sites never need a direct `serenity` dependency for builder types — `use pwr_ext::view_support::*` or `pwr_ext::prelude::*` covers imports, and `serde::Deserialize` is re-exported from the prelude for generic code.
 
+### Runtime assembly: `component!` + splices
+
+`view!` children are compile-time literals, so a runtime 0..N piece of a fixed
+shape is authored as a standalone builder with `component!` (which emits the
+bare builder for one element), wrapped explicitly in the parent's component
+enum, and spliced back in at its pinned position. This is the pattern the
+pwr-bot settings hub uses for its discovered-plugins nav row:
+
+```rust
+use pwr_ext::component;
+use pwr_ext::view;
+use pwr_ext::view_support::{ButtonStyle, CreateButton, CreateContainerComponent};
+
+// Runtime nav row: 0..N buttons from a host lookup, Option-gated on the
+// discovery being non-empty. `component!` emits the bare `CreateActionRow`;
+// the consumer wraps it in `CreateContainerComponent::ActionRow` explicitly.
+let targets: Vec<&str> = host.list_plugins().unwrap_or_default();
+let nav_row: Option<CreateContainerComponent<'static>> = if targets.is_empty() {
+    None
+} else {
+    let buttons: Vec<CreateButton<'static>> = targets
+        .into_iter()
+        .map(|t| CreateButton::new(format!("settings:open:{t}")).label(format!("Open {t}")))
+        .collect();
+    Some(CreateContainerComponent::ActionRow(component! {
+        action_row {
+            { buttons } // splice the runtime buttons into the row
+        }
+    }))
+};
+
+let hub = view! {
+    components_v2 {
+        container {
+            text_display { "-# **Settings**" }
+            action_row {
+                button { custom_id: "settings:config:feeds", label: "Feeds", style: ButtonStyle::Secondary }
+            }
+            { nav_row } // spliced at its pinned position, only when non-empty
+        }
+        action_row {
+            button { custom_id: "settings:about", label: "🛈 About", style: ButtonStyle::Secondary }
+        }
+    }
+};
+```
+
+Inside a `component!` body, splices behave exactly as in `view!` (the same
+`expand_<element>` functions run), and the emitted builder is the bare
+serenity builder — no `CreateMessage` wrapping, so the consumer controls how
+it is embedded via the enum variants of its parent.
+
+Splices are allowed in every parent-child position **except** the `select_menu`
+options arm, which stays literal-only. That arm has an exactly-one/or-N rule
+that is not expressible as an `IntoIterator` splice; a runtime options builder
+calls the public `check_select_menu_options` helper instead. In a spliced
+parent that carries a child rule, the child count is checked at runtime: the
+macro emits a panicking `check_*` call over the combined literal+spliced
+children, and the panic carries the violated law in the message. A pure-literal
+parent keeps its compile-time checks and emits no runtime call.
+
 ## Exclusions
 
 Three types stay out on purpose:

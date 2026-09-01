@@ -10,6 +10,10 @@ _Avoid_: adapter, DTO, proxy
 
 **Public surface**:
 The written exposure rule: the public surface is exactly the Wrapper types, their `From<Wrapper> for Builder` impls, the prelude re-exports, and documented inherent methods a dependee consumes (`CreateMessageDe::into_canonical_value`, currently consumed by pwr-viewgen). Everything else — parse functions, mirror structs, helpers, wrapper fields, inner builders — stays crate-private even when `pub` would compile. New items join the surface only by adding a Wrapper plus its prelude entry.
+
+One sanctioned exception: the `view_support` module and its runtime `check_*`
+helpers are `pub`. The `view!` macro expands in the dependee's crate, so the
+helpers it calls must be reachable there. The exception is named here.
 _Avoid_: leaking internals, accidental pub
 
 **Flat builder**:
@@ -45,10 +49,22 @@ A named block in the DSL (`embed`, `action_row`, `container`, …) that maps to 
 A `key: value` pair inside an element or at the root that maps to a builder setter. Values are arbitrary Rust expressions.
 
 **Child rule**:
-Which elements may appear under a parent, and with what cardinality (e.g. action_row ≤5 buttons or 1 select, section 1–3 text displays + 1 accessory). Enforced at compile time when children are literals.
+Which elements may appear under a parent, and with what cardinality (e.g. action_row ≤5 buttons or 1 select, section 1–3 text displays + 1 accessory). Enforced at compile time when children are literals, and at runtime by the emitted `check_*` helper when a splice is present.
 
 **Registry**:
 The hand-maintained table in `pwr-ext-macros` mapping element → builder type, attribute → setter, and allowed children. The macro's single source of truth for name checking and did-you-mean.
 
 **Wrap rule**:
 Parent-decided enum wrapping for children that exist in multiple trees (e.g. `action_row` under `view!` becomes `CreateComponent::ActionRow`, under `container` becomes `CreateContainerComponent::ActionRow`).
+
+**Splice**:
+A runtime-built sequence of components injected into a `view!` child position, written `{ expr }` where `expr` is an iterator of the parent's exact wrapped child type. Positionally significant: the spliced children land where authored. An `Option` spliced in acts as a conditional — `Some` contributes one item, `None` contributes none.
+_Avoid_: runtime children, dynamic children
+
+**Standalone form (`component!`)**:
+The `component!` proc-macro that emits one bare builder for a single element, without the `CreateMessage` wrapper. The consumer wraps it in the parent's component enum to embed it.
+_Avoid_: standalone component macro, bare macro
+
+**Runtime law check**:
+A panicking `check_*` helper in `view_support` that enforces a parent's child rule over runtime-assembled children. Emitted in generated code only when a splice is present; also callable directly by a consumer doing pure runtime assembly.
+_Avoid_: runtime validation, panic guard
