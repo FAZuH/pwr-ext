@@ -4,6 +4,7 @@
 
 use std::borrow::Cow;
 
+use pwr_ext::view_support::ChildRuleError;
 use pwr_ext::view_support::CreateActionRow;
 use pwr_ext::view_support::CreateButton;
 use pwr_ext::view_support::CreateComponent;
@@ -125,24 +126,28 @@ fn v2_root_all_kinds() -> Vec<CreateComponent<'static>> {
 
 #[test]
 fn action_row_allows_up_to_five_buttons() {
-    check_action_row_children(&nav_buttons(5));
+    check_action_row_children(&nav_buttons(5)).unwrap();
 }
 
 #[test]
-#[should_panic(expected = "action_row cannot contain more than 5 buttons")]
 fn action_row_rejects_a_sixth_button() {
-    check_action_row_children(&nav_buttons(6));
+    assert_eq!(
+        check_action_row_children(&nav_buttons(6)).unwrap_err(),
+        ChildRuleError::ActionRowTooManyButtons
+    );
 }
 
 #[test]
-#[should_panic(expected = "action_row must contain at least one button or a select menu")]
 fn action_row_rejects_an_empty_child_list() {
-    check_action_row_children(&[]);
+    assert_eq!(
+        check_action_row_children(&[]).unwrap_err(),
+        ChildRuleError::ActionRowEmpty
+    );
 }
 
 #[test]
 fn section_allows_three_text_displays_with_a_thumbnail() {
-    check_section_children(&section_texts(3), Some(&thumbnail_accessory()));
+    check_section_children(&section_texts(3), Some(&thumbnail_accessory())).unwrap();
 }
 
 #[test]
@@ -150,64 +155,77 @@ fn section_allows_one_text_display_with_a_button_accessory() {
     check_section_children(
         &section_texts(1),
         Some(&CreateSectionAccessory::Button(section_button())),
+    )
+    .unwrap();
+}
+
+#[test]
+fn section_rejects_a_fourth_text_display() {
+    assert_eq!(
+        check_section_children(&section_texts(4), Some(&thumbnail_accessory())).unwrap_err(),
+        ChildRuleError::SectionTooManyTextDisplays
     );
 }
 
 #[test]
-#[should_panic(expected = "section cannot contain more than 3 text_display components")]
-fn section_rejects_a_fourth_text_display() {
-    check_section_children(&section_texts(4), Some(&thumbnail_accessory()));
-}
-
-#[test]
-#[should_panic(expected = "section must contain at least one `text_display`")]
 fn section_rejects_an_empty_child_list() {
-    check_section_children(&[], Some(&thumbnail_accessory()));
+    assert_eq!(
+        check_section_children(&[], Some(&thumbnail_accessory())).unwrap_err(),
+        ChildRuleError::SectionEmpty
+    );
 }
 
 #[test]
-#[should_panic(expected = "section requires exactly one accessory (`thumbnail` or `button`)")]
 fn section_rejects_a_missing_accessory() {
-    check_section_children(&section_texts(1), None);
+    assert_eq!(
+        check_section_children(&section_texts(1), None).unwrap_err(),
+        ChildRuleError::SectionMissingAccessory
+    );
 }
 
 #[test]
 fn select_menu_allows_up_to_twenty_five_options() {
-    check_select_menu_options(&select_options(25));
+    check_select_menu_options(&select_options(25)).unwrap();
 }
 
 #[test]
-#[should_panic(expected = "select menu cannot have more than 25 options")]
 fn select_menu_rejects_a_twenty_sixth_option() {
-    check_select_menu_options(&select_options(26));
+    assert_eq!(
+        check_select_menu_options(&select_options(26)).unwrap_err(),
+        ChildRuleError::SelectMenuTooManyOptions
+    );
 }
 
 #[test]
 fn select_menu_allows_an_empty_option_list() {
     // The macro enforces no minimum option count, so neither does this check.
-    check_select_menu_options(&[]);
+    check_select_menu_options(&[]).unwrap();
 }
 
 #[test]
 fn media_gallery_allows_one_item() {
-    check_media_gallery_items(&gallery_items(1));
+    check_media_gallery_items(&gallery_items(1)).unwrap();
 }
 
 #[test]
 fn media_gallery_allows_ten_items() {
-    check_media_gallery_items(&gallery_items(10));
+    check_media_gallery_items(&gallery_items(10)).unwrap();
 }
 
 #[test]
-#[should_panic(expected = "media_gallery must contain at least one `media_gallery_item`")]
 fn media_gallery_rejects_an_empty_item_list() {
-    check_media_gallery_items(&[]);
+    assert_eq!(
+        check_media_gallery_items(&[]).unwrap_err(),
+        ChildRuleError::MediaGalleryEmpty
+    );
 }
 
 #[test]
-#[should_panic(expected = "media_gallery cannot contain more than 10 items")]
 fn media_gallery_rejects_an_eleventh_item() {
-    check_media_gallery_items(&gallery_items(11));
+    assert_eq!(
+        check_media_gallery_items(&gallery_items(11)).unwrap_err(),
+        ChildRuleError::MediaGalleryTooManyItems
+    );
 }
 
 #[test]
@@ -215,27 +233,29 @@ fn container_allows_every_child_kind_up_to_forty_children() {
     let mut children = container_all_kinds();
     children.extend(container_texts(34));
     assert_eq!(children.len(), 40);
-    check_container_children(&children);
+    check_container_children(&children).unwrap();
 }
 
 #[test]
-#[should_panic(expected = "container cannot contain more than 40 components")]
 fn container_rejects_a_forty_first_child() {
     let mut children = container_all_kinds();
     children.extend(container_texts(35));
-    check_container_children(&children);
+    assert_eq!(
+        check_container_children(&children).unwrap_err(),
+        ChildRuleError::ContainerTooManyChildren
+    );
 }
 
 #[test]
 fn container_allows_an_empty_child_list() {
     // The macro enforces no minimum container child count, so neither does
     // this check.
-    check_container_children(&[]);
+    check_container_children(&[]).unwrap();
 }
 
 #[test]
 fn v2_root_allows_every_v2_child_kind() {
-    check_v2_root_children(&v2_root_all_kinds());
+    check_v2_root_children(&v2_root_all_kinds()).unwrap();
 }
 
 #[test]
@@ -243,25 +263,28 @@ fn v2_root_allows_up_to_forty_children() {
     let mut children = v2_root_all_kinds();
     children.extend(root_texts(33));
     assert_eq!(children.len(), 40);
-    check_v2_root_children(&children);
+    check_v2_root_children(&children).unwrap();
 }
 
 #[test]
-#[should_panic(expected = "components_v2 cannot contain more than 40 components")]
 fn v2_root_rejects_a_forty_first_child() {
     let mut children = v2_root_all_kinds();
     children.extend(root_texts(34));
-    check_v2_root_children(&children);
+    assert_eq!(
+        check_v2_root_children(&children).unwrap_err(),
+        ChildRuleError::V2RootTooManyChildren
+    );
 }
 
 #[test]
-#[should_panic(expected = "`components_v2` must contain at least one component")]
 fn v2_root_rejects_an_empty_child_list() {
-    check_v2_root_children(&[]);
+    assert_eq!(
+        check_v2_root_children(&[]).unwrap_err(),
+        ChildRuleError::V2RootEmpty
+    );
 }
 
 #[test]
-#[should_panic(expected = "`label` cannot appear inside `components_v2` — labels are modal-only")]
 fn v2_root_rejects_a_modal_label_child() {
     let children = vec![
         CreateComponent::TextDisplay(text_display("root")),
@@ -270,5 +293,9 @@ fn v2_root_rejects_a_modal_label_child() {
             string_select_menu(),
         )),
     ];
-    check_v2_root_children(&children);
+    let err = check_v2_root_children(&children).unwrap_err();
+    assert!(
+        err.to_string()
+            .contains("`label` cannot appear inside `components_v2` — labels are modal-only")
+    );
 }

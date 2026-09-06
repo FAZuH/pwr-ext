@@ -6,6 +6,7 @@
 //! the spliced code path only.
 
 use pwr_ext::view;
+use pwr_ext::view_support::ChildRuleError;
 use pwr_ext::view_support::CreateActionRow;
 use pwr_ext::view_support::CreateButton;
 use pwr_ext::view_support::CreateComponent;
@@ -104,7 +105,7 @@ fn container_positional_splice_parity() {
                 CreateContainerComponent::TextDisplay(CreateTextDisplay::new("last")),
             ],
         ))]);
-    assert_eq!(to_value(via_macro), to_value(expected));
+    assert_eq!(to_value(via_macro.unwrap()), to_value(expected));
 }
 
 // ── container – Option<T> splice (conditional) ─────────────────────────────
@@ -132,7 +133,7 @@ fn container_option_some_splice_parity() {
                 CreateContainerComponent::TextDisplay(CreateTextDisplay::new("b")),
             ],
         ))]);
-    assert_eq!(to_value(via_macro), to_value(expected));
+    assert_eq!(to_value(via_macro.unwrap()), to_value(expected));
 }
 
 #[test]
@@ -155,7 +156,7 @@ fn container_option_none_splice_parity() {
                 CreateContainerComponent::TextDisplay(CreateTextDisplay::new("b")),
             ],
         ))]);
-    assert_eq!(to_value(via_macro), to_value(expected));
+    assert_eq!(to_value(via_macro.unwrap()), to_value(expected));
 }
 
 // ── action_row – positional splice ─────────────────────────────────────────
@@ -178,7 +179,7 @@ fn action_row_positional_splice_parity() {
             CreateButton::new("b4").label("B4"),
         ]),
     )]);
-    assert_eq!(to_value(via_macro), to_value(expected));
+    assert_eq!(to_value(via_macro.unwrap()), to_value(expected));
 }
 
 // ── v2 root – positional splice ────────────────────────────────────────────
@@ -200,7 +201,7 @@ fn v2_root_positional_splice_parity() {
             CreateComponent::TextDisplay(CreateTextDisplay::new("root 0")),
             CreateComponent::TextDisplay(CreateTextDisplay::new("b")),
         ]);
-    assert_eq!(to_value(via_macro), to_value(expected));
+    assert_eq!(to_value(via_macro.unwrap()), to_value(expected));
 }
 
 // ── legacy root – positional splice (components) ───────────────────────────
@@ -223,7 +224,7 @@ fn legacy_root_positional_splice_parity() {
             CreateButton::new("legacy:0").label("Row 0"),
         ])),
     ]);
-    assert_eq!(to_value(via_macro), to_value(expected));
+    assert_eq!(to_value(via_macro.unwrap()), to_value(expected));
 }
 
 // ── section – positional splice ────────────────────────────────────────────
@@ -254,7 +255,7 @@ fn section_positional_splice_parity() {
                 "https://example.test/t.png",
             ))),
         ))]);
-    assert_eq!(to_value(via_macro), to_value(expected));
+    assert_eq!(to_value(via_macro.unwrap()), to_value(expected));
 }
 #[test]
 fn media_gallery_positional_splice_parity() {
@@ -279,7 +280,7 @@ fn media_gallery_positional_splice_parity() {
         .components(vec![CreateComponent::MediaGallery(
             CreateMediaGallery::new(items),
         )]);
-    assert_eq!(to_value(via_macro), to_value(expected));
+    assert_eq!(to_value(via_macro.unwrap()), to_value(expected));
 }
 
 // ── embed fields – positional splice ───────────────────────────────────────
@@ -303,88 +304,93 @@ fn embed_fields_positional_splice_parity() {
             .field("Field 1", "value 1", false)
             .field("Z", "z", false),
     ]);
-    assert_eq!(to_value(via_macro), to_value(expected));
+    assert_eq!(to_value(via_macro.unwrap()), to_value(expected));
 }
 
 // ── runtime law checks fire for spliced parents ────────────────────────────
 
 #[test]
-#[should_panic(expected = "action_row cannot contain more than 5 buttons")]
-fn action_row_splice_over_limit_panics_at_runtime() {
-    let _ = view! {
+fn action_row_splice_over_limit_is_rejected() {
+    let err = view! {
         action_row {
             { nav_buttons(6) }
         }
-    };
+    }
+    .unwrap_err();
+    assert_eq!(err, ChildRuleError::ActionRowTooManyButtons);
 }
 
 #[test]
-#[should_panic(expected = "section cannot contain more than 3 text_display components")]
-fn section_splice_over_limit_panics_at_runtime() {
-    let _ = view! {
+fn section_splice_over_limit_is_rejected() {
+    let err = view! {
         components_v2 {
             section {
                 { section_texts(4) }
                 thumbnail { media: "https://example.test/t.png" }
             }
         }
-    };
+    }
+    .unwrap_err();
+    assert_eq!(err, ChildRuleError::SectionTooManyTextDisplays);
 }
 
 #[test]
-#[should_panic(expected = "media_gallery must contain at least one `media_gallery_item`")]
-fn media_gallery_splice_empty_panics_at_runtime() {
-    let _ = view! {
+fn media_gallery_splice_empty_is_rejected() {
+    let err = view! {
         components_v2 {
             media_gallery {
                 { Vec::<CreateMediaGalleryItem<'static>>::new() }
             }
         }
-    };
+    }
+    .unwrap_err();
+    assert_eq!(err, ChildRuleError::MediaGalleryEmpty);
 }
 
 #[test]
-#[should_panic(expected = "components_v2 cannot contain more than 40 components")]
-fn v2_root_splice_over_limit_panics_at_runtime() {
-    let _ = view! {
+fn v2_root_splice_over_limit_is_rejected() {
+    let err = view! {
         components_v2 {
             { root_texts(41) }
         }
-    };
+    }
+    .unwrap_err();
+    assert_eq!(err, ChildRuleError::V2RootTooManyChildren);
 }
 
 #[test]
-#[should_panic(expected = "`components_v2` must contain at least one component")]
-fn v2_root_splice_empty_panics_at_runtime() {
-    let _ = view! {
+fn v2_root_splice_empty_is_rejected() {
+    let err = view! {
         components_v2 {
             { Vec::<CreateComponent<'static>>::new() }
         }
-    };
+    }
+    .unwrap_err();
+    assert_eq!(err, ChildRuleError::V2RootEmpty);
 }
 
 #[test]
-#[should_panic(expected = "container cannot contain more than 40 components")]
-fn container_splice_over_limit_panics_at_runtime() {
-    let _ = view! {
+fn container_splice_over_limit_is_rejected() {
+    let err = view! {
         components_v2 {
             container {
                 { container_texts(41) }
             }
         }
-    };
+    }
+    .unwrap_err();
+    assert_eq!(err, ChildRuleError::ContainerTooManyChildren);
 }
 
 // ── order-independent count guard: splice anywhere defers to runtime ───────
 
 #[test]
-#[should_panic(expected = "action_row cannot contain more than 5 buttons")]
-fn action_row_literal_over_limit_with_leading_splice_panics_at_runtime() {
+fn action_row_literal_over_limit_with_leading_splice_is_rejected() {
     // 6 literal buttons + a leading splice: the compile-time guard must
-    // NOT fire (the splice exists), so the row compiles and panics at
-    // runtime when the check sees 6 buttons.
+    // NOT fire (the splice exists), so the row compiles and the runtime
+    // check rejects it when it sees 6 buttons.
     let extra = nav_buttons(0);
-    let _ = view! {
+    let err = view! {
         action_row {
             { extra }
             button { custom_id: "b1", label: "B1" }
@@ -394,17 +400,18 @@ fn action_row_literal_over_limit_with_leading_splice_panics_at_runtime() {
             button { custom_id: "b5", label: "B5" }
             button { custom_id: "b6", label: "B6" }
         }
-    };
+    }
+    .unwrap_err();
+    assert_eq!(err, ChildRuleError::ActionRowTooManyButtons);
 }
 
 #[test]
-#[should_panic(expected = "action_row cannot contain more than 5 buttons")]
-fn action_row_literal_over_limit_with_trailing_splice_panics_at_runtime() {
+fn action_row_literal_over_limit_with_trailing_splice_is_rejected() {
     // 6 literal buttons + a trailing splice: same outcome — the guard
     // scans ALL items, so the trailing splice is seen and the row is
-    // routed to the runtime check, producing the same panic.
+    // routed to the runtime check, which rejects it.
     let extra = nav_buttons(0);
-    let _ = view! {
+    let err = view! {
         action_row {
             button { custom_id: "b1", label: "B1" }
             button { custom_id: "b2", label: "B2" }
@@ -414,14 +421,15 @@ fn action_row_literal_over_limit_with_trailing_splice_panics_at_runtime() {
             button { custom_id: "b6", label: "B6" }
             { extra }
         }
-    };
+    }
+    .unwrap_err();
+    assert_eq!(err, ChildRuleError::ActionRowTooManyButtons);
 }
 
 #[test]
-#[should_panic(expected = "section cannot contain more than 3 text_display components")]
-fn section_literal_over_limit_with_leading_splice_panics_at_runtime() {
+fn section_literal_over_limit_with_leading_splice_is_rejected() {
     let extra = section_texts(0);
-    let _ = view! {
+    let err = view! {
         components_v2 {
             section {
                 { extra }
@@ -432,14 +440,15 @@ fn section_literal_over_limit_with_leading_splice_panics_at_runtime() {
                 thumbnail { media: "https://example.test/t.png" }
             }
         }
-    };
+    }
+    .unwrap_err();
+    assert_eq!(err, ChildRuleError::SectionTooManyTextDisplays);
 }
 
 #[test]
-#[should_panic(expected = "section cannot contain more than 3 text_display components")]
-fn section_literal_over_limit_with_trailing_splice_panics_at_runtime() {
+fn section_literal_over_limit_with_trailing_splice_is_rejected() {
     let extra = section_texts(0);
-    let _ = view! {
+    let err = view! {
         components_v2 {
             section {
                 text_display { "1" }
@@ -450,5 +459,7 @@ fn section_literal_over_limit_with_trailing_splice_panics_at_runtime() {
                 thumbnail { media: "https://example.test/t.png" }
             }
         }
-    };
+    }
+    .unwrap_err();
+    assert_eq!(err, ChildRuleError::SectionTooManyTextDisplays);
 }

@@ -8,6 +8,7 @@
 
 use pwr_ext::component;
 use pwr_ext::view;
+use pwr_ext::view_support::ChildRuleError;
 use pwr_ext::view_support::CreateActionRow;
 use pwr_ext::view_support::CreateButton;
 use pwr_ext::view_support::CreateComponent;
@@ -118,4 +119,33 @@ fn container_serializes_identically_to_view() {
         .flags(MessageFlags::from_bits_truncate(1 << 15))
         .components(vec![CreateComponent::Container(bare)]);
     assert_eq!(to_value(&via_view), to_value(&via_component));
+}
+
+#[test]
+fn literal_only_component_is_bare_builder() {
+    // Type annotation is the assertion: this compiles only because a
+    // literal-only `component!` evaluates to the bare builder, not a Result.
+    let row: CreateActionRow = component! {
+        action_row {
+            button { custom_id: "b1", label: "B1" }
+        }
+    };
+    let expected = CreateActionRow::buttons(vec![CreateButton::new("b1").label("B1")]);
+    assert_eq!(to_value(&row), to_value(&expected));
+}
+
+#[test]
+fn spliced_component_over_limit_is_rejected() {
+    let buttons: Vec<CreateButton<'static>> = (0..6)
+        .map(|i| CreateButton::new(format!("b{i}")).label(format!("B{i}")))
+        .collect();
+    assert_eq!(
+        component! {
+            action_row {
+                { buttons }
+            }
+        }
+        .unwrap_err(),
+        ChildRuleError::ActionRowTooManyButtons
+    );
 }

@@ -71,6 +71,7 @@ fn hub_message(nav_row: Option<CreateContainerComponent<'static>>) -> CreateMess
             }
         }
     }
+    .unwrap()
 }
 
 // ── hand-built oracle ──────────────────────────────────────────────────────
@@ -141,11 +142,14 @@ fn hub_with_non_empty_discovery() {
             CreateButton::new(format!("settings:open:{target}")).label(format!("Open {target}"))
         })
         .collect();
-    let nav_row = Some(CreateContainerComponent::ActionRow(component! {
-        action_row {
-            { nav_buttons }
+    let nav_row = Some(CreateContainerComponent::ActionRow(
+        component! {
+            action_row {
+                { nav_buttons }
+            }
         }
-    }));
+        .unwrap(),
+    ));
 
     let json = to_value(hub_message(nav_row));
     let expected = oracle(Some(CreateActionRow::buttons(vec![
