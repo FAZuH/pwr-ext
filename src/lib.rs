@@ -76,13 +76,13 @@ pub use pwr_ext_macros::view;
 /// macro's generated code. Call sites never need a direct `serenity`
 /// dependency; the macro always emits `::pwr_ext::view_support::…` paths.
 ///
-/// The module also hosts the runtime child-rule checks: panicking
+/// The module also hosts the runtime child-rule checks: fallible
 /// counterparts of the child rules `view!` enforces at compile time for
 /// literal children, for child lists assembled at runtime. Each check
-/// carries the violated law in its panic message. These helpers are the
-/// documented exception to the crate's public-surface rule (see
-/// CONTEXT.md): they are `pub` because the macro expands in the dependee's
-/// crate and the generated code must reach them via
+/// returns a [`ChildRuleError`] variant naming the violated law. These
+/// helpers are the documented exception to the crate's public-surface rule
+/// (see CONTEXT.md): they are `pub` because the macro expands in the
+/// dependee's crate and the generated code must reach them via
 /// `::pwr_ext::view_support::*`.
 pub mod view_support {
     pub use serenity::builder::CreateActionRow;
@@ -121,6 +121,79 @@ pub mod view_support {
     pub use serenity::model::id::GenericChannelId;
     pub use serenity::model::id::RoleId;
 
+    /// The error a runtime child-rule check returns when a child list
+    /// violates its law. One variant per law, so callers can `match` on the
+    /// violation instead of parsing prose. `Display` prints the law text
+    /// verbatim, matching the compile-time diagnostics `view!` emits for
+    /// literal children.
+    ///
+    /// The enum is `#[non_exhaustive]`: new laws can add variants without
+    /// breaking callers.
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    #[non_exhaustive]
+    pub enum ChildRuleError {
+        /// An action row was built with no button and no select menu.
+        ActionRowEmpty,
+        /// An action row holds more than 5 buttons.
+        ActionRowTooManyButtons,
+        /// A section has no text display.
+        SectionEmpty,
+        /// A section has more than 3 text displays.
+        SectionTooManyTextDisplays,
+        /// A section has no accessory.
+        SectionMissingAccessory,
+        /// A string select menu has more than 25 options.
+        SelectMenuTooManyOptions,
+        /// A media gallery has no items.
+        MediaGalleryEmpty,
+        /// A media gallery has more than 10 items.
+        MediaGalleryTooManyItems,
+        /// A container has more than 40 children.
+        ContainerTooManyChildren,
+        /// A `components_v2` root contains a modal-only `label` child.
+        V2RootLabelChild,
+        /// A `components_v2` root has no children.
+        V2RootEmpty,
+        /// A `components_v2` root has more than 40 children.
+        V2RootTooManyChildren,
+    }
+
+    impl std::fmt::Display for ChildRuleError {
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            let law = match self {
+                Self::ActionRowEmpty => {
+                    "action_row must contain at least one button or a select menu"
+                }
+                Self::ActionRowTooManyButtons => "action_row cannot contain more than 5 buttons",
+                Self::SectionEmpty => "section must contain at least one `text_display`",
+                Self::SectionTooManyTextDisplays => {
+                    "section cannot contain more than 3 text_display components"
+                }
+                Self::SectionMissingAccessory => {
+                    "section requires exactly one accessory (`thumbnail` or `button`)"
+                }
+                Self::SelectMenuTooManyOptions => "select menu cannot have more than 25 options",
+                Self::MediaGalleryEmpty => {
+                    "media_gallery must contain at least one `media_gallery_item`"
+                }
+                Self::MediaGalleryTooManyItems => "media_gallery cannot contain more than 10 items",
+                Self::ContainerTooManyChildren => {
+                    "container cannot contain more than 40 components"
+                }
+                Self::V2RootLabelChild => {
+                    "`label` cannot appear inside `components_v2` — labels are modal-only"
+                }
+                Self::V2RootEmpty => "`components_v2` must contain at least one component",
+                Self::V2RootTooManyChildren => {
+                    "components_v2 cannot contain more than 40 components"
+                }
+            };
+            f.write_str(law)
+        }
+    }
+
+    impl std::error::Error for ChildRuleError {}
+
     /// Checks a runtime-assembled action-row button list against the
     /// `action_row` child rule the `view!` macro enforces at compile time
     /// for literal children: an action row holds up to 5 buttons or exactly
@@ -132,19 +205,20 @@ pub mod view_support {
     /// select-menu row holds exactly one menu. This check enforces the laws
     /// a button list can violate.
     ///
-    /// # Panics
+    /// # Errors
     ///
-    /// Panics when the list violates a law, with the law in the message:
+    /// Returns [`ChildRuleError`] when the list violates a law:
     ///
     /// - no button and no select menu (an empty list builds an empty row)
     /// - more than 5 buttons
-    pub fn check_action_row_children(buttons: &[CreateButton<'_>]) {
+    pub fn check_action_row_children(buttons: &[CreateButton<'_>]) -> Result<(), ChildRuleError> {
         if buttons.is_empty() {
-            panic!("action_row must contain at least one button or a select menu");
+            return Err(ChildRuleError::ActionRowEmpty);
         }
         if buttons.len() > 5 {
-            panic!("action_row cannot contain more than 5 buttons");
+            return Err(ChildRuleError::ActionRowTooManyButtons);
         }
+        Ok(())
     }
 
     /// Checks runtime-assembled section children against the `section` child
@@ -155,9 +229,9 @@ pub mod view_support {
     /// so the exactly-one-accessory and text-displays-before-accessory laws
     /// are structural; the text-display count is what this check enforces.
     ///
-    /// # Panics
+    /// # Errors
     ///
-    /// Panics when the children violate a law, with the law in the message:
+    /// Returns [`ChildRuleError`] when the children violate a law:
     ///
     /// - no text display
     /// - more than 3 text displays
@@ -165,16 +239,17 @@ pub mod view_support {
     pub fn check_section_children(
         text_displays: &[CreateSectionComponent<'_>],
         accessory: Option<&CreateSectionAccessory<'_>>,
-    ) {
+    ) -> Result<(), ChildRuleError> {
         if text_displays.is_empty() {
-            panic!("section must contain at least one `text_display`");
+            return Err(ChildRuleError::SectionEmpty);
         }
         if text_displays.len() > 3 {
-            panic!("section cannot contain more than 3 text_display components");
+            return Err(ChildRuleError::SectionTooManyTextDisplays);
         }
         if accessory.is_none() {
-            panic!("section requires exactly one accessory (`thumbnail` or `button`)");
+            return Err(ChildRuleError::SectionMissingAccessory);
         }
+        Ok(())
     }
 
     /// Checks runtime-assembled string-select options against the
@@ -182,33 +257,38 @@ pub mod view_support {
     /// literal children: at most 25 options. The macro enforces no minimum,
     /// so this check does not either.
     ///
-    /// # Panics
+    /// # Errors
     ///
-    /// Panics when the list holds more than 25 options, with the law in the
-    /// message.
-    pub fn check_select_menu_options(options: &[CreateSelectMenuOption<'_>]) {
+    /// Returns [`ChildRuleError`] when the list holds more than 25 options.
+    pub fn check_select_menu_options(
+        options: &[CreateSelectMenuOption<'_>],
+    ) -> Result<(), ChildRuleError> {
         if options.len() > 25 {
-            panic!("select menu cannot have more than 25 options");
+            return Err(ChildRuleError::SelectMenuTooManyOptions);
         }
+        Ok(())
     }
 
     /// Checks runtime-assembled media-gallery items against the
     /// `media_gallery` child rule the `view!` macro enforces at compile time
     /// for literal children: 1 to 10 items.
     ///
-    /// # Panics
+    /// # Errors
     ///
-    /// Panics when the list violates a law, with the law in the message:
+    /// Returns [`ChildRuleError`] when the list violates a law:
     ///
     /// - no items
     /// - more than 10 items
-    pub fn check_media_gallery_items(items: &[CreateMediaGalleryItem<'_>]) {
+    pub fn check_media_gallery_items(
+        items: &[CreateMediaGalleryItem<'_>],
+    ) -> Result<(), ChildRuleError> {
         if items.is_empty() {
-            panic!("media_gallery must contain at least one `media_gallery_item`");
+            return Err(ChildRuleError::MediaGalleryEmpty);
         }
         if items.len() > 10 {
-            panic!("media_gallery cannot contain more than 10 items");
+            return Err(ChildRuleError::MediaGalleryTooManyItems);
         }
+        Ok(())
     }
 
     /// Checks runtime-assembled container children against the container
@@ -223,14 +303,16 @@ pub mod view_support {
     /// in total, which no parent with more than 40 direct children can
     /// satisfy.
     ///
-    /// # Panics
+    /// # Errors
     ///
-    /// Panics when the list holds more than 40 children, with the law in the
-    /// message.
-    pub fn check_container_children(children: &[CreateContainerComponent<'_>]) {
+    /// Returns [`ChildRuleError`] when the list holds more than 40 children.
+    pub fn check_container_children(
+        children: &[CreateContainerComponent<'_>],
+    ) -> Result<(), ChildRuleError> {
         if children.len() > 40 {
-            panic!("container cannot contain more than 40 components");
+            return Err(ChildRuleError::ContainerTooManyChildren);
         }
+        Ok(())
     }
 
     /// Checks runtime-assembled `components_v2` root children against the
@@ -243,26 +325,27 @@ pub mod view_support {
     /// Every [`CreateComponent`] variant except `Label` is a legal v2 root
     /// child, so the kind law rejects modal-only labels.
     ///
-    /// # Panics
+    /// # Errors
     ///
-    /// Panics when the children violate a law, with the law in the message:
+    /// Returns [`ChildRuleError`] when the children violate a law:
     ///
     /// - a modal-only `label` child
     /// - no children at all
     /// - more than 40 children
-    pub fn check_v2_root_children(children: &[CreateComponent<'_>]) {
+    pub fn check_v2_root_children(children: &[CreateComponent<'_>]) -> Result<(), ChildRuleError> {
         if children
             .iter()
             .any(|child| matches!(child, CreateComponent::Label(_)))
         {
-            panic!("`label` cannot appear inside `components_v2` — labels are modal-only");
+            return Err(ChildRuleError::V2RootLabelChild);
         }
         if children.is_empty() {
-            panic!("`components_v2` must contain at least one component");
+            return Err(ChildRuleError::V2RootEmpty);
         }
         if children.len() > 40 {
-            panic!("components_v2 cannot contain more than 40 components");
+            return Err(ChildRuleError::V2RootTooManyChildren);
         }
+        Ok(())
     }
 }
 
