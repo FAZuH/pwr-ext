@@ -165,6 +165,22 @@ fn parse_splice(input: ParseStream) -> syn::Result<ViewItem> {
     })
 }
 
+/// Whether any item — at the top level or nested inside an element body — is
+/// a `{ expr }` splice. Attribute values are ordinary expressions and are not
+/// walked: a `{ ... }` attribute value is a block expression, not a splice.
+///
+/// Load-bearing invariant: this must stay a superset of every position where
+/// `build_child_list` emits a `check_*…?` call. A missed detection unwraps a
+/// wrapped expansion, leaving a bare `?` in a non-fallible context — a
+/// compile error at the call site.
+pub fn any_splice(items: &[ViewItem]) -> bool {
+    items.iter().any(|item| match item {
+        ViewItem::Splice { .. } => true,
+        ViewItem::Element { body, .. } => any_splice(&body.items),
+        ViewItem::Attr { .. } | ViewItem::Bare(_) => false,
+    })
+}
+
 /// Simple edit-distance helper for "did you mean?" suggestions.
 pub fn did_you_mean<'a>(input: &str, candidates: &[&'a str]) -> Option<&'a str> {
     let mut best: Option<(&str, usize)> = None;
@@ -485,5 +501,29 @@ mod tests {
             }
             _ => panic!("expected splice"),
         }
+    }
+
+    #[test]
+    fn any_splice_false_for_literal_only() {
+        let vi = parse(r#"content: "hi", embed { title: "t" }"#).unwrap();
+        assert!(!any_splice(&vi.items));
+    }
+
+    #[test]
+    fn any_splice_true_for_top_level_splice() {
+        let vi = parse(r#"content: "hi" { buttons }"#).unwrap();
+        assert!(any_splice(&vi.items));
+    }
+
+    #[test]
+    fn any_splice_true_for_nested_splice() {
+        let vi = parse(r#"action_row { button { label: "x" } { more } }"#).unwrap();
+        assert!(any_splice(&vi.items));
+    }
+
+    #[test]
+    fn any_splice_ignores_attr_brace_values() {
+        let vi = parse(r#"content: { format!("x") }"#).unwrap();
+        assert!(!any_splice(&vi.items));
     }
 }

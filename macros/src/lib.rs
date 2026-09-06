@@ -19,6 +19,7 @@ mod parse;
 use parse::ViewBody;
 use parse::ViewInput;
 use parse::ViewItem;
+use parse::any_splice;
 use parse::did_you_mean;
 
 /// Author a serenity message view.
@@ -29,6 +30,15 @@ use parse::did_you_mean;
 ///   `allowed_mentions`. Evaluates to `CreateMessage` without `IS_COMPONENTS_V2`.
 /// * **Components v2** — explicit `components_v2` root element containing v2
 ///   components. The macro auto-sets `IS_COMPONENTS_V2` (OR-ing any user `flags`).
+///
+/// # Return type
+///
+/// Literal-only views evaluate to the bare builder (`CreateMessage`). A view
+/// containing at least one `{ expr }` splice evaluates to
+/// `Result<CreateMessage, ChildRuleError>`: runtime-spliced child lists are
+/// checked against the same child laws as literal children, and a violation
+/// is returned instead of panicking. The rule is one-directional — a splice
+/// always makes the view return `Result`, even where no child law applies.
 #[proc_macro]
 pub fn view(input: TokenStream) -> TokenStream {
     let parsed = syn::parse_macro_input!(input as ViewInput);
@@ -56,6 +66,14 @@ pub fn view(input: TokenStream) -> TokenStream {
 /// `CreateContainerComponent::ActionRow` inside a `container`), so
 /// `component!` always emits the bare builder and leaves the wrapping to the
 /// call site. Splices inside the element body behave exactly as in `view!`.
+///
+/// # Return type
+///
+/// Literal-only bodies evaluate to the bare builder. A body containing at
+/// least one `{ expr }` splice evaluates to
+/// `Result<Builder, ChildRuleError>` — spliced child lists are checked
+/// against the element's child laws, and a violation is returned instead of
+/// panicking.
 #[proc_macro]
 pub fn component(input: TokenStream) -> TokenStream {
     let parsed = syn::parse_macro_input!(input as ViewInput);
@@ -104,25 +122,27 @@ fn expand_component(input: &ViewInput) -> syn::Result<proc_macro2::TokenStream> 
         )
     })?;
     let n = name.to_string();
-    match n.as_str() {
-        "action_row" => expand_action_row(body),
-        "text_display" => expand_text_display(body),
-        "container" => expand_container(body),
-        "section" => expand_section(body),
-        "thumbnail" => expand_thumbnail(body),
-        "media_gallery" => expand_media_gallery(body),
-        "file" => expand_file(body),
-        "separator" => expand_separator(body),
-        "embed" => expand_embed(body),
-        "button" => expand_button(body),
-        "select_menu" => expand_select_menu(body, "select_menu"),
-        "select_menu_option" => expand_select_menu_option(body),
-        "poll" => expand_poll(body),
-        "poll_answer" => expand_poll_answer(body),
-        "components_v2" => Err(syn::Error::new_spanned(
-            name,
-            "`components_v2` is a message root — use `view!` to build a full message; `component!` emits a single bare builder",
-        )),
+    let expansion = match n.as_str() {
+        "action_row" => expand_action_row(body)?,
+        "text_display" => expand_text_display(body)?,
+        "container" => expand_container(body)?,
+        "section" => expand_section(body)?,
+        "thumbnail" => expand_thumbnail(body)?,
+        "media_gallery" => expand_media_gallery(body)?,
+        "file" => expand_file(body)?,
+        "separator" => expand_separator(body)?,
+        "embed" => expand_embed(body)?,
+        "button" => expand_button(body)?,
+        "select_menu" => expand_select_menu(body, "select_menu")?,
+        "select_menu_option" => expand_select_menu_option(body)?,
+        "poll" => expand_poll(body)?,
+        "poll_answer" => expand_poll_answer(body)?,
+        "components_v2" => {
+            return Err(syn::Error::new_spanned(
+                name,
+                "`components_v2` is a message root — use `view!` to build a full message; `component!` emits a single bare builder",
+            ));
+        }
         _ => {
             let known = [
                 "action_row",
@@ -144,9 +164,10 @@ fn expand_component(input: &ViewInput) -> syn::Result<proc_macro2::TokenStream> 
             if let Some(s) = did_you_mean(&n, &known) {
                 msg.push_str(&format!(" — did you mean `{s}`?"));
             }
-            Err(syn::Error::new_spanned(name, msg))
+            return Err(syn::Error::new_spanned(name, msg));
         }
-    }
+    };
+    Ok(wrap_if_spliced(expansion, &body.items))
 }
 
 fn expand(input: &ViewInput) -> syn::Result<proc_macro2::TokenStream> {
@@ -211,9 +232,11 @@ fn expand(input: &ViewInput) -> syn::Result<proc_macro2::TokenStream> {
                 "expected exactly one `components_v2` element in v2 family",
             ));
         }
-        return expand_v2_root(v2_bodies[0]);
+        let expansion = expand_v2_root(v2_bodies[0])?;
+        return Ok(wrap_if_spliced(expansion, &v2_bodies[0].items));
     }
-    expand_legacy_root(input)
+    let expansion = expand_legacy_root(input)?;
+    Ok(wrap_if_spliced(expansion, &input.items))
 }
 
 fn expand_legacy_root(input: &ViewInput) -> syn::Result<proc_macro2::TokenStream> {
@@ -564,6 +587,24 @@ fn has_splice(steps: &[VecStep]) -> bool {
     steps.iter().any(|s| matches!(s, VecStep::Extend(_)))
 }
 
+/// Wraps an expansion in an immediately-invoked closure returning
+/// `Result<_, ChildRuleError>` so an inner `?` (a spliced child-list check)
+/// propagates as the macro's return value. Literal views keep the bare
+/// builder: the wrap is applied only when the items contain a splice.
+fn wrap_if_spliced(
+    expansion: proc_macro2::TokenStream,
+    items: &[ViewItem],
+) -> proc_macro2::TokenStream {
+    if !any_splice(items) {
+        return expansion;
+    }
+    quote! {
+        (|| -> ::std::result::Result<_, ::pwr_ext::view_support::ChildRuleError> {
+            ::std::result::Result::Ok(#expansion)
+        })()
+    }
+}
+
 /// The literal child tokens of a parent's child list, in author order —
 /// the `vec![...]` element list for the literal-only emission path.
 fn literal_steps(steps: &[VecStep]) -> Vec<&proc_macro2::TokenStream> {
@@ -623,8 +664,8 @@ fn build_child_list(
         }
     }
     let check_call = match (check, check_extra) {
-        (Some(c), Some(extra)) => quote! { #c(&#ident, #extra); },
-        (Some(c), None) => quote! { #c(&#ident); },
+        (Some(c), Some(extra)) => quote! { #c(&#ident, #extra)?; },
+        (Some(c), None) => quote! { #c(&#ident)?; },
         (None, _) => quote! {},
     };
     let bind = bind.unwrap_or_else(|| quote! {});
@@ -1372,10 +1413,7 @@ fn expand_action_row(body: &ViewBody) -> syn::Result<proc_macro2::TokenStream> {
     // Decide once whether the row contains any splice, over ALL items, so
     // the compile-vs-runtime count guard is order-independent: any splice
     // anywhere defers the button limit to the runtime check.
-    let has_any_splice = body
-        .items
-        .iter()
-        .any(|item| matches!(item, ViewItem::Splice { .. }));
+    let has_any_splice = any_splice(&body.items);
 
     for item in &body.items {
         match item {
@@ -2550,10 +2588,7 @@ fn expand_section(body: &ViewBody) -> syn::Result<proc_macro2::TokenStream> {
     let mut accessory: Option<proc_macro2::TokenStream> = None;
     // Decide once, over ALL items, whether the section contains any splice.
     // The count guard and the compile-vs-runtime branch share this boolean.
-    let has_any_splice = body
-        .items
-        .iter()
-        .any(|item| matches!(item, ViewItem::Splice { .. }));
+    let has_any_splice = any_splice(&body.items);
 
     for item in &body.items {
         match item {
