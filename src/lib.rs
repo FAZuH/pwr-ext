@@ -114,9 +114,12 @@ pub mod view_support {
     pub use serenity::model::Timestamp;
     pub use serenity::model::application::ButtonStyle;
     pub use serenity::model::application::SeparatorSpacingSize;
+    pub use serenity::model::channel::ChannelType;
     pub use serenity::model::channel::MessageFlags;
     pub use serenity::model::channel::PollLayoutType;
     pub use serenity::model::channel::ReactionType;
+    pub use serenity::model::id::GenericChannelId;
+    pub use serenity::model::id::RoleId;
 
     /// Checks a runtime-assembled action-row button list against the
     /// `action_row` child rule the `view!` macro enforces at compile time
