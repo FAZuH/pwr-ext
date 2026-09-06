@@ -150,8 +150,9 @@ use pwr_ext::view;
 use pwr_ext::view_support::{ButtonStyle, CreateButton, CreateContainerComponent};
 
 // Runtime nav row: 0..N buttons from a host lookup, Option-gated on the
-// discovery being non-empty. `component!` emits the bare `CreateActionRow`;
-// the consumer wraps it in `CreateContainerComponent::ActionRow` explicitly.
+// discovery being non-empty. `component!` emits the bare `CreateActionRow`
+// — a `Result` here, because the body contains a splice; the consumer wraps
+// it in `CreateContainerComponent::ActionRow` explicitly.
 let targets: Vec<&str> = host.list_plugins().unwrap_or_default();
 let nav_row: Option<CreateContainerComponent<'static>> = if targets.is_empty() {
     None
@@ -160,11 +161,14 @@ let nav_row: Option<CreateContainerComponent<'static>> = if targets.is_empty() {
         .into_iter()
         .map(|t| CreateButton::new(format!("settings:open:{t}")).label(format!("Open {t}")))
         .collect();
-    Some(CreateContainerComponent::ActionRow(component! {
-        action_row {
-            { buttons } // splice the runtime buttons into the row
+    Some(CreateContainerComponent::ActionRow(
+        component! {
+            action_row {
+                { buttons } // splice the runtime buttons into the row
+            }
         }
-    }))
+        .expect("spliced row obeys the button law"),
+    ))
 };
 
 let hub = view! {
@@ -180,22 +184,27 @@ let hub = view! {
             button { custom_id: "settings:about", label: "🛈 About", style: ButtonStyle::Secondary }
         }
     }
-};
+}
+.expect("spliced view obeys the component laws");
 ```
 
 Inside a `component!` body, splices behave exactly as in `view!` (the same
 `expand_<element>` functions run), and the emitted builder is the bare
-serenity builder — no `CreateMessage` wrapping, so the consumer controls how
-it is embedded via the enum variants of its parent.
+serenity builder — a `Result` when the body contains splices — with no
+`CreateMessage` wrapping, so the consumer controls how it is embedded via
+the enum variants of its parent.
 
 Splices are allowed in every parent-child position **except** the `select_menu`
 options arm, which stays literal-only. That arm has an exactly-one/or-N rule
 that is not expressible as an `IntoIterator` splice; a runtime options builder
 calls the public `check_select_menu_options` helper instead. In a spliced
 parent that carries a child rule, the child count is checked at runtime: the
-macro emits a panicking `check_*` call over the combined literal+spliced
-children, and the panic carries the violated law in the message. A pure-literal
-parent keeps its compile-time checks and emits no runtime call.
+macro emits a fallible `check_*` call over the combined literal+spliced
+children, and the returned error carries the violated law in the message. A
+view containing at least one splice therefore evaluates to
+`Result<CreateMessage, ChildRuleError>` (`component!` follows the same rule
+for its element body); a pure-literal parent keeps its compile-time checks,
+emits no runtime call, and still yields the bare builder.
 
 ## Exclusions
 

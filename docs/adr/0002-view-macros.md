@@ -99,3 +99,48 @@ The output stays typed builders, not a VNode tree.
   are `pub` because the macro expands in the dependee's crate.
 * A spliced parent gives up fully compile-time child-rule enforcement. The law
   becomes a panic at runtime, with the law in the message.
+
+## Amendment (2026-09-06): runtime checks return `Result`, not panic
+
+Supersedes the panic policy above (the "Runtime-law policy (a)+(b)" paragraph
+and the "law becomes a panic" consequence) for the runtime `check_*` helpers.
+Everything else in this ADR stands: emission target B, family separation, the
+splice grammar, `component!`, and the helper-per-parent-kind layout.
+
+**What changed.** The six `check_*` helpers in `view_support` now return
+`Result<(), ChildRuleError>` instead of panicking. `ChildRuleError` is a
+closed `#[non_exhaustive]` enum with one variant per law, so callers can
+`match` the violation instead of parsing prose. `Display` prints the law text
+verbatim and the type implements `std::error::Error` — no allocation, no new
+dependency. The macro's
+generated code propagates it with `?` inside the spliced expansion.
+
+**Why.** Splices exist to assemble children from runtime data, and runtime
+data is user input — panicking on it is wrong. A panic is also not matchable;
+a dependee could only guard with `catch_unwind`. The checks stay advisory
+(Discord remains the authority, direct children only), so an error the caller
+can log-and-degrade on is the right shape, and it keeps the "named law"
+diagnosis the panics provided.
+
+**Conditional return.** `view!` returns `Result<CreateMessage, ChildRuleError>`
+**iff** the view contains at least one `{ expr }` splice; `component!` follows
+the same rule for its element body. Literal-only views keep returning the bare
+builder — zero friction on the DSL's main path, and the guard becomes
+type-driven: adding a splice to a previously literal view makes call sites
+fail to compile until they handle the `Result`. Uniform Result was rejected
+(it taxes literal call sites that cannot fail); this was option 5 of a
+5-option tradeoff analysis, user-approved.
+
+**Accepted over-approximation.** The rule is one-directional: splice ⇒ Result.
+If a splice sits in a position that carries no child-law check (embed fields,
+legacy-root component splices), the view still returns `Result` even though
+its error value can never occur. Detection is a recursive walk of the parsed
+items (`any_splice`), which is a superset of the positions that emit a check.
+
+## Consequences (amendment)
+
+* `ChildRuleError` joins `view_support` under the same public-surface
+  sanctioned exception (see CONTEXT.md).
+* Spliced views now surface failures as `Err` at the call site instead of
+  unwinding; tests match on the law variant with `assert_eq!`.
+* `# Panics` sections in the helper docs became `# Errors`.

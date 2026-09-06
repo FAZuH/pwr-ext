@@ -11,9 +11,10 @@ _Avoid_: adapter, DTO, proxy
 **Public surface**:
 The written exposure rule: the public surface is exactly the Wrapper types, their `From<Wrapper> for Builder` impls, the prelude re-exports, and documented inherent methods a dependee consumes (`CreateMessageDe::into_canonical_value`, currently consumed by pwr-viewgen). Everything else — parse functions, mirror structs, helpers, wrapper fields, inner builders — stays crate-private even when `pub` would compile. New items join the surface only by adding a Wrapper plus its prelude entry.
 
-One sanctioned exception: the `view_support` module and its runtime `check_*`
-helpers are `pub`. The `view!` macro expands in the dependee's crate, so the
-helpers it calls must be reachable there. The exception is named here.
+One sanctioned exception: the `view_support` module, its runtime `check_*`
+helpers, and `ChildRuleError` are `pub`. The `view!` macro expands in the
+dependee's crate, so the helpers and error type it references must be
+reachable there. The exception is named here.
 _Avoid_: leaking internals, accidental pub
 
 **Flat builder**:
@@ -66,5 +67,5 @@ The `component!` proc-macro that emits one bare builder for a single element, wi
 _Avoid_: standalone component macro, bare macro
 
 **Runtime law check**:
-A panicking `check_*` helper in `view_support` that enforces a parent's child rule over runtime-assembled children. Emitted in generated code only when a splice is present; also callable directly by a consumer doing pure runtime assembly.
+A fallible `check_*` helper in `view_support` that enforces a parent's child rule over runtime-assembled children, returning `Err(ChildRuleError)` carrying the violated law text. Emitted in generated code only when a splice is present — the spliced view itself then returns `Result`; also callable directly by a consumer doing pure runtime assembly.
 _Avoid_: runtime validation, panic guard
